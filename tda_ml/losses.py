@@ -81,7 +81,7 @@ class SizeRegularizationLoss(nn.Module):
         self.w_minor = w_minor
 
     def forward(self, params):
-        axes = params[..., 0:2]
+        axes = params[..., 2:4]
         major_axis = axes.max(dim=-1)[0]
         minor_axis = axes.min(dim=-1)[0]
         loss = (self.w_major * (major_axis**2) + self.w_minor * (minor_axis**2)).mean()
@@ -105,7 +105,7 @@ class AnisotropyPenaltyLoss(nn.Module):
         if abs(self.weight) < 1e-9:
             return torch.tensor(0.0, device=params.device)
             
-        axes = params[..., 0:2]
+        axes = params[..., 2:4]
         major_axis = axes.max(dim=-1)[0]
         minor_axis = axes.min(dim=-1)[0]
         

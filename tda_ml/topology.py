@@ -61,7 +61,10 @@ def compute_anisotropic_distance_matrix(
 
     Args:
         points (torch.Tensor): (B, N, 2) Coordinates of centers.
-        params (torch.Tensor): (B, N, 3) Ellipse shape [a, b, theta] at each point in ``points``.
+        params (torch.Tensor): (B, N, 3) or (B, N, 5).
+            - (B, N, 3): compact ellipse parameters [a, b, theta]
+            - (B, N, 5): full model head output [dx, dy, a, b, theta]
+              (center offsets are currently ignored in distance computation)
         probs (torch.Tensor, optional): (B, N) Outlier probabilities in $[0,1]$.
             When provided, squared distances are divided by
             ``(1-probs).unsqueeze(2) * (1-probs).unsqueeze(1)`` (clamped).
@@ -75,10 +78,15 @@ def compute_anisotropic_distance_matrix(
             f"points must have shape (B, N, 2), got shape {tuple(points.shape)}"
         )
     batch_size, num_points, _ = points.shape
-    if params.shape != (batch_size, num_points, 3):
+    if params.ndim != 3 or params.shape[0] != batch_size or params.shape[1] != num_points:
         raise ValueError(
-            "params must have shape (B, N, 3) matching points; "
+            "params must have shape (B, N, K) matching points; "
             f"got points {tuple(points.shape)}, params {tuple(params.shape)}"
+        )
+    if params.shape[-1] not in (3, 5):
+        raise ValueError(
+            "params must have shape (B, N, 3) or (B, N, 5); "
+            f"got params {tuple(params.shape)}"
         )
     if probs is not None and probs.shape != (batch_size, num_points):
         raise ValueError(
@@ -87,7 +95,10 @@ def compute_anisotropic_distance_matrix(
         )
 
     centers = points
-    m00, m11, m01 = compute_anisotropic_metric(params[..., 0:2], params[..., 2:3])
+    metric_params = params if params.shape[-1] == 3 else params[..., 2:5]
+    m00, m11, m01 = compute_anisotropic_metric(
+        metric_params[..., 0:2], metric_params[..., 2:3]
+    )
 
     # Compute relative coordinates (B, N, N, 2)
     # diff[b, i, j] = centers[b, j] - centers[b, i]

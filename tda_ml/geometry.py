@@ -7,9 +7,20 @@ import torch
 def ellipse_params_to_centers_cov_torch(
     points: torch.Tensor, params: torch.Tensor
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """(N,2) points + (N,3) [a,b,theta] -> centers (N,2), cov (N,2,2)."""
+    """(N,2) points + (N,3|5) params -> centers (N,2), cov (N,2,2)."""
+    if params.ndim != 2:
+        raise ValueError(f"params must be rank-2, got shape {tuple(params.shape)}")
+    if params.shape[1] == 3:
+        compact = params
+    elif params.shape[1] == 5:
+        compact = params[:, 2:5]
+    else:
+        raise ValueError(
+            "params must have shape (N, 3) [a,b,theta] or (N, 5) [dx,dy,a,b,theta]; "
+            f"got shape {tuple(params.shape)}"
+        )
     centers = points
-    a, b, th = params[:, 0], params[:, 1], params[:, 2]
+    a, b, th = compact[:, 0], compact[:, 1], compact[:, 2]
     cos_t, sin_t = torch.cos(th), torch.sin(th)
     r00 = cos_t**2 * a**2 + sin_t**2 * b**2
     r01 = cos_t * sin_t * (a**2 - b**2)
@@ -27,8 +38,19 @@ def ellipse_params_to_centers_cov_numpy(
     """NumPy equivalent of ``ellipse_params_to_centers_cov_torch``."""
     points_np = np.asarray(points_np, dtype=np.float64)
     params_np = np.asarray(params_np, dtype=np.float64)
+    if params_np.ndim != 2:
+        raise ValueError(f"params must be rank-2, got shape {params_np.shape}")
+    if params_np.shape[1] == 3:
+        compact = params_np
+    elif params_np.shape[1] == 5:
+        compact = params_np[:, 2:5]
+    else:
+        raise ValueError(
+            "params must have shape (N, 3) [a,b,theta] or (N, 5) [dx,dy,a,b,theta]; "
+            f"got shape {params_np.shape}"
+        )
     centers = points_np
-    a, b, th = params_np[:, 0], params_np[:, 1], params_np[:, 2]
+    a, b, th = compact[:, 0], compact[:, 1], compact[:, 2]
     cos_t, sin_t = np.cos(th), np.sin(th)
     r00 = cos_t**2 * a**2 + sin_t**2 * b**2
     r01 = cos_t * sin_t * (a**2 - b**2)

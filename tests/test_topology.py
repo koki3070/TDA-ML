@@ -59,6 +59,15 @@ class TestTopology(unittest.TestCase):
                 points, params, symmetrize="mean"
             )
 
+    def test_accepts_full_model_params_dim5(self):
+        points, params3 = self._make_batch()
+        # Full model layout: [dx, dy, a, b, theta]
+        offsets = torch.zeros((points.shape[0], points.shape[1], 2), dtype=points.dtype)
+        params5 = torch.cat([offsets, params3], dim=-1)
+        dist3 = compute_anisotropic_distance_matrix(points, params3, symmetrize="max")
+        dist5 = compute_anisotropic_distance_matrix(points, params5, symmetrize="max")
+        self.assertTrue(torch.allclose(dist3, dist5, atol=1e-8))
+
 
 if __name__ == "__main__":
     unittest.main()

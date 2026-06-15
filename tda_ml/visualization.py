@@ -99,9 +99,10 @@ def visualize(
             t = np.linspace(0, 2 * np.pi, 50)
             if len(data_np) > 0:
                 for k in range(len(data_np)):
-                    a, b, theta = params_np[k]
-                    cx = data_np[k, 0]
-                    cy = data_np[k, 1]
+                    dx, dy, a, b, theta = params_np[k]
+
+                    cx = data_np[k, 0] + dx
+                    cy = data_np[k, 1] + dy
 
                     x_e = a * np.cos(t)
                     y_e = b * np.sin(t)

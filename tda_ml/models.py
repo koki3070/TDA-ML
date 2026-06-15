@@ -17,10 +17,6 @@ class DecoupledGeometricEncoder(nn.Module):
     3. Feature Learning: Process canonical coordinates through MLPs to learn structural corrections.
     """
     def __init__(self, in_dim=2, local_dim=64, k=5):
-        if in_dim != 2:
-            raise ValueError(
-                f"DecoupledGeometricEncoder only supports 2D point clouds (in_dim=2), got in_dim={in_dim}"
-            )
         super().__init__()
         self.k = k
         self.local_dim = local_dim
@@ -96,22 +92,24 @@ class AnisotropicOutlierClassifier(nn.Module):
     Uses ``DecoupledGeometricEncoder(..., k=10)`` for local neighborhoods unless you replace
     ``self.encoder`` after construction.
 
-    The model transforms baseline PCA ellipses into "learned" ellipses anchored at each input point:
+    The model transforms baseline PCA ellipses into "learned" ellipses:
     1. Outlier Logit: $l_i = f_{cls}(z_i)$
     2. Ellipse Axes: $a_i = a_{i, base} \cdot \exp(\Delta a_i)$, $b_i = b_{i, base} \cdot \exp(\Delta b_i)$
     3. Ellipse Angle: $\theta_i = \theta_{i, base} + \tanh(\Delta \theta_i) \cdot \frac{\pi}{2}$
 
-    ``ellipse_param_dim`` must be ``3`` (``[a, b, theta]`` per point). Five-dimensional
-    ellipse outputs are not implemented in this PR.
+    These parameters define the local metric for topological analysis.
 
-    ``forward`` returns ellipse parameters with shape ``(B, N, ellipse_param_dim)``.
+    ``ellipse_param_dim`` must be ``5`` (full head: offsets unused + axes + angle)
+    or ``3`` (legacy compact head: raw axis scales + angle delta only). The
+    ``forward`` implementation dispatches on this value so ``model(x)`` is safe
+    for both layouts.
     """
-    def __init__(self, point_dim=2, feature_dim=128, ellipse_param_dim: int = 3):
+    def __init__(self, point_dim=2, feature_dim=128, ellipse_param_dim=5):
         super().__init__()
-        if ellipse_param_dim != 3:
+
+        if ellipse_param_dim not in (3, 5):
             raise ValueError(
-                "AnisotropicOutlierClassifier supports ellipse_param_dim=3 ([a, b, theta]) only; "
-                f"got ellipse_param_dim={ellipse_param_dim}. Five-dimensional outputs are not implemented."
+                f"ellipse_param_dim must be 3 or 5, got {ellipse_param_dim}"
             )
         self.ellipse_param_dim = ellipse_param_dim
 
@@ -128,10 +126,12 @@ class AnisotropicOutlierClassifier(nn.Module):
         self.topology_head = nn.Sequential(
             nn.Linear(head_in_dim, 64),
             nn.ReLU(),
-            nn.Linear(64, ellipse_param_dim),
+            nn.Linear(64, ellipse_param_dim)
         )
-        nn.init.constant_(self.topology_head[-1].bias[0], -1.0)
-        nn.init.constant_(self.topology_head[-1].bias[1], -1.0)
+        
+        if ellipse_param_dim >= 4:
+            nn.init.constant_(self.topology_head[-1].bias[2], -1.0)
+            nn.init.constant_(self.topology_head[-1].bias[3], -1.0)
 
     def forward(self, x):
         cls_feats, topo_feats, base_angle, base_axes = self.encoder(x)
@@ -139,10 +139,24 @@ class AnisotropicOutlierClassifier(nn.Module):
         outlier_logits = self.classification_head(cls_feats)
         raw = self.topology_head(topo_feats)
 
-        axes_scale = torch.exp(raw[:, :, 0:2])
-        axes = axes_scale * base_axes + 1e-4
-        angle_delta = torch.tanh(raw[:, :, 2:3]) * (torch.pi / 2)
+        if self.ellipse_param_dim == 3:
+            center_offsets = torch.zeros(
+                raw.shape[0],
+                raw.shape[1],
+                2,
+                device=raw.device,
+                dtype=raw.dtype,
+            )
+            axes_scale = torch.exp(raw[:, :, 0:2])
+            axes = axes_scale * base_axes + 1e-4
+            angle_delta = torch.tanh(raw[:, :, 2:3]) * (torch.pi / 2)
+        else:
+            center_offsets = torch.zeros_like(raw[:, :, 0:2])
+            axes_scale = torch.exp(raw[:, :, 2:4])
+            axes = axes_scale * base_axes + 1e-4
+            angle_delta = torch.tanh(raw[:, :, 4:5]) * (torch.pi / 2)
+
         angle = base_angle + angle_delta
-        ellipse_params = torch.cat([axes, angle], dim=2)
+        ellipse_params = torch.cat([center_offsets, axes, angle], dim=2)
 
         return outlier_logits, ellipse_params
