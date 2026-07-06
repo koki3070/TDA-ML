@@ -5,11 +5,11 @@ from tda_ml.distance_backend import compute_ellphi_distance_matrix_np
 from tda_ml.topology import compute_anisotropic_distance_matrix
 
 
-def calculate_anisotropic_distance_matrix(
+def compute_anisotropic_distance_matrix_np(
     points, params, metric="max", probs=None, backend="mahalanobis"
 ):
     """
-    Calculate the anisotropic distance matrix between points.
+    Compute the anisotropic distance matrix between points as a NumPy array.
     Uses the centralized logic from tda_ml.topology for mathematical consistency.
 
     Args:
@@ -73,13 +73,13 @@ def apply_anisotropic_dbscan(
         metric: Symmetrization strategy ('max' or 'min')
         probs: (N,) outlier probabilities; when ``backend='mahalanobis'``, distances use
             the same inlier-pair weighting as :func:`tda_ml.topology.compute_anisotropic_distance_matrix`
-            (see ``calculate_anisotropic_distance_matrix``). Ignored for ``ellphi``.
+            (see ``compute_anisotropic_distance_matrix_np``). Ignored for ``ellphi``.
         backend: ``mahalanobis`` or ``ellphi``
 
     Returns:
         labels: Cluster labels for each point (-1 for noise)
     """
-    dist_matrix = calculate_anisotropic_distance_matrix(
+    dist_matrix = compute_anisotropic_distance_matrix_np(
         points, params, metric=metric, probs=probs, backend=backend
     )
     

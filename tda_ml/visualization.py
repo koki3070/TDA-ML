@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-from tda_ml.dbscan import apply_anisotropic_dbscan, calculate_anisotropic_distance_matrix
+from tda_ml.dbscan import apply_anisotropic_dbscan, compute_anisotropic_distance_matrix_np
 
 INLIER_COLOR = "tab:blue"
 OUTLIER_COLOR = "tab:red"
@@ -18,7 +18,7 @@ def _auto_eps(points_np, params_np, backend, quantile=0.3):
     Declared heuristic so the DBSCAN panel stays informative regardless of the
     (possibly collapsed) absolute ellipse scale. Not used for any reported metric.
     """
-    dm = calculate_anisotropic_distance_matrix(
+    dm = compute_anisotropic_distance_matrix_np(
         points_np, params_np, metric="max", probs=None, backend=backend
     )
     off = dm[dm > 0]

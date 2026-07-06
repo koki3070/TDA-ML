@@ -12,7 +12,7 @@ import torch
 
 from tda_ml.config import load_config
 from tda_ml.data_loader import NoisyMNISTDataset
-from tda_ml.dbscan import calculate_anisotropic_distance_matrix
+from tda_ml.dbscan import compute_anisotropic_distance_matrix_np
 from tda_ml.model_inference import load_model
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -94,10 +94,10 @@ def plot_distance_matrices(
     title_suffix: str = "",
     normalize: str = "none",
 ) -> None:
-    dm_maha = calculate_anisotropic_distance_matrix(
+    dm_maha = compute_anisotropic_distance_matrix_np(
         points, params, metric="max", probs=None, backend="mahalanobis"
     )
-    dm_ell = calculate_anisotropic_distance_matrix(
+    dm_ell = compute_anisotropic_distance_matrix_np(
         points, params, metric="max", probs=None, backend="ellphi"
     )
 

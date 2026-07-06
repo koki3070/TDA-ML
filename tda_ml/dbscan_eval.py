@@ -13,7 +13,7 @@ import numpy as np
 import torch
 from sklearn.cluster import DBSCAN
 
-from tda_ml.dbscan import calculate_anisotropic_distance_matrix
+from tda_ml.dbscan import compute_anisotropic_distance_matrix_np
 from tda_ml.metrics import compute_recall_specificity_gmean_mcc_wdist
 from tda_ml.topo_wdist import TopoWdistOptions
 
@@ -95,7 +95,7 @@ def prepare_clouds(
     """Precompute distance matrices once per cloud (reused across the grid)."""
     prepared: list[PreparedCloud] = []
     for points, params, labels_gt, clean_pc in clouds:
-        dist = calculate_anisotropic_distance_matrix(
+        dist = compute_anisotropic_distance_matrix_np(
             points, params, metric=metric, backend=backend
         )
         prepared.append(
