@@ -14,7 +14,8 @@ from torch_topological.nn import VietorisRipsComplex, WassersteinDistance
 from tda_ml.config import deep_update, load_config, model_kwargs_from_config
 from tda_ml.data_loader import NoisyMNISTDataset, create_data_loader
 from tda_ml.distance_backend import compute_distance_matrix_batch
-from tda_ml.main import _configure_torch_runtime, _resolve_dataloader_settings, main as train_main
+from tda_ml.main import main as train_main
+from tda_ml.run_setup import configure_torch_runtime, resolve_dataloader_settings
 from tda_ml.models import AnisotropicOutlierClassifier
 from tda_ml.seed_utils import set_global_seed
 from tda_ml.trainer import Trainer
@@ -122,8 +123,8 @@ def main() -> int:
     )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    _configure_torch_runtime(cfg, device)
-    num_workers, pin_memory, persistent_workers, prefetch_factor = _resolve_dataloader_settings(
+    configure_torch_runtime(cfg, device)
+    num_workers, pin_memory, persistent_workers, prefetch_factor = resolve_dataloader_settings(
         cfg, device
     )
     data_cfg = cfg["data"]

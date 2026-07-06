@@ -36,6 +36,28 @@ class Trainer:
         self.model.to(self.device)
 
         self.optimizer = Adam(model.parameters(), lr=config['training']['lr'])
+        self._init_amp(config)
+        self._init_losses(config)
+
+        self.visualize_every = config['training'].get('visualize_every', 5)
+        self.output_dir = config['outputs']['image_dir']
+        self.log_dir = config['outputs']['log_dir']
+
+        os.makedirs(self.output_dir, exist_ok=True)
+        os.makedirs(self.log_dir, exist_ok=True)
+
+        self.fixed_indices = None
+        self.threshold = config['model'].get('threshold', 0.5)
+
+        self.vr_complex = VietorisRipsComplex(dim=1)
+
+        self.warmup_epochs = config.get('training', {}).get('warmup_epochs', 0)
+
+        self._val_aniso_accum = 0.0
+        self._val_size_accum = 0.0
+
+    def _init_amp(self, config):
+        """Mixed-precision settings (AMP autocast / GradScaler)."""
         training_cfg = config.get('training', {})
         perf_cfg = config.get('performance', {})
         self.use_amp = (
@@ -47,6 +69,9 @@ class Trainer:
         self.amp_dtype = torch.float16 if amp_dtype_name == "float16" else torch.bfloat16
         self.scaler = torch.amp.GradScaler("cuda", enabled=self.use_amp)
 
+    def _init_losses(self, config):
+        """Parse loss weights (loss.* with legacy training.* fallbacks) and build loss modules."""
+        training_cfg = config.get('training', {})
         loss_cfg = config.get('loss', {})
 
         self.lambda_class = loss_cfg.get('w_class', training_cfg.get('lambda_class', 1.0))
@@ -139,25 +164,6 @@ class Trainer:
             )
         if self.topo_loss_max_points is not None:
             logger.info("Topological loss subsampling: max_points=%s", self.topo_loss_max_points)
-
-        self.visualize_every = config['training'].get('visualize_every', 5)
-        self.output_dir = config['outputs']['image_dir']
-        self.log_dir = config['outputs']['log_dir']
-
-        os.makedirs(self.output_dir, exist_ok=True)
-        os.makedirs(self.log_dir, exist_ok=True)
-
-        self.fixed_indices = None
-        self.threshold = config['model'].get('threshold', 0.5)
-
-        self.vr_complex = VietorisRipsComplex(dim=1)
-
-        self.warmup_epochs = training_cfg.get('warmup_epochs', 0)
-
-        self._val_aniso_accum = 0.0
-        self._val_size_accum = 0.0
-
-    # _compute_regularization_loss is now handled by classes in losses.py
 
     def _compute_clean_pd_info(self, clean_pc: torch.Tensor):
         """Compute clean (teacher) persistence diagrams without gradient tracking."""
