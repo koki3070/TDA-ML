@@ -4,14 +4,16 @@ import os
 import torch
 from torch.optim import Adam
 from torch_topological.nn import VietorisRipsComplex
-from tda_ml.visualization import visualize
+from tda_ml.teacher_pd import compute_clean_teacher_batch
 from tda_ml.losses import (
     ClassificationLoss, 
     TopologicalLoss, 
     SizeRegularizationLoss, 
-    AnisotropyPenaltyLoss
+    AnisotropyPenaltyLoss,
+    MinBRegularizationLoss,
 )
 from tda_ml.metrics import compute_recall_specificity_gmean_mcc
+from tda_ml.visualization import visualize
 import tqdm
 from sklearn.metrics import f1_score, precision_score, recall_score
 
@@ -50,6 +52,17 @@ class Trainer:
         self.lambda_class = loss_cfg.get('w_class', training_cfg.get('lambda_class', 1.0))
         self.lambda_topo = loss_cfg.get('w_topo', training_cfg.get('lambda_topo', 0.1))
         self.lambda_aniso = loss_cfg.get('w_aniso', training_cfg.get('lambda_aniso', 0.01))
+        self.lambda_min_b = loss_cfg.get(
+            'w_min_b', training_cfg.get('lambda_min_b', 0.0)
+        )
+        self.min_b_target = float(
+            loss_cfg.get('min_b_target', training_cfg.get('min_b_target', 0.2))
+        )
+        self.topo_loss_max_points = training_cfg.get(
+            'topo_loss_max_points', loss_cfg.get('topo_loss_max_points')
+        )
+        if self.topo_loss_max_points is not None:
+            self.topo_loss_max_points = int(self.topo_loss_max_points)
         
         size_default = loss_cfg.get(
             "w_size", training_cfg.get("lambda_size", 0.1)
@@ -68,19 +81,45 @@ class Trainer:
         _topo = config.get("model", {}).get("topology_loss", {})
         self.distance_backend = _topo.get("distance_backend", "mahalanobis")
         self.ellphi_differentiable = _topo.get("ellphi_differentiable", True)
+        self.prob_weighting = bool(_topo.get("prob_weighting", True))
+        # Filtration-unit alignment for the topology loss (see TopologicalLoss).
+        # Legacy knob `training.topo_eps_scale` (v73=0.7022); also accept loss.topo_eps_scale.
+        self.topo_eps_scale = float(
+            loss_cfg.get("topo_eps_scale", training_cfg.get("topo_eps_scale", 1.0))
+        )
+        self.topo_scale_mode = str(
+            loss_cfg.get("topo_scale_mode", training_cfg.get("topo_scale_mode", "fixed"))
+        ).strip().lower()
+        self.teacher_mode = str(
+            loss_cfg.get("teacher_mode", training_cfg.get("teacher_mode", "euclidean"))
+        ).strip().lower()
+        self.teacher_local_pca_k = int(
+            loss_cfg.get(
+                "teacher_local_pca_k",
+                training_cfg.get("teacher_local_pca_k", 10),
+            )
+        )
         logger.info(
-            "Topological distance backend: %s%s",
+            "Topological distance backend: %s%s (prob_weighting=%s, scale_mode=%s, eps_scale=%s, teacher_mode=%s)",
             self.distance_backend,
             (
                 f" (ellphi_differentiable={self.ellphi_differentiable})"
                 if self.distance_backend == "ellphi"
                 else ""
             ),
+            self.prob_weighting,
+            self.topo_scale_mode,
+            self.topo_eps_scale,
+            self.teacher_mode,
         )
         self.topo_loss_fn = TopologicalLoss(
             weight=self.lambda_topo,
             distance_backend=self.distance_backend,
             ellphi_differentiable=self.ellphi_differentiable,
+            prob_weighting=self.prob_weighting,
+            eps_scale=self.topo_eps_scale,
+            scale_mode=self.topo_scale_mode,
+            max_points=self.topo_loss_max_points,
         )
         self.size_loss_fn = SizeRegularizationLoss(w_major=self.lambda_major, w_minor=self.lambda_minor)
         self.aniso_loss_fn = AnisotropyPenaltyLoss(
@@ -88,6 +127,18 @@ class Trainer:
             mode=self.aniso_mode, 
             barrier_threshold=config['training'].get('barrier_threshold', 6.0)
         )
+        self.min_b_loss_fn = MinBRegularizationLoss(
+            weight=self.lambda_min_b,
+            target=self.min_b_target,
+        )
+        if self.lambda_min_b > 0:
+            logger.info(
+                "Min-B regularization: lambda=%s target=%s",
+                self.lambda_min_b,
+                self.min_b_target,
+            )
+        if self.topo_loss_max_points is not None:
+            logger.info("Topological loss subsampling: max_points=%s", self.topo_loss_max_points)
 
         self.visualize_every = config['training'].get('visualize_every', 5)
         self.output_dir = config['outputs']['image_dir']
@@ -108,15 +159,18 @@ class Trainer:
 
     # _compute_regularization_loss is now handled by classes in losses.py
 
-    def _compute_clean_pd_info(self, clean_pc: torch.Tensor) -> list:
-        """Compute clean persistence diagrams without gradient tracking."""
-        clean_pd_info = []
-        with torch.no_grad():
-            for j in range(clean_pc.shape[0]):
-                c = clean_pc[j]
-                valid_mask = torch.abs(c).sum(dim=1) > 1e-6
-                clean_pd_info.append(self.vr_complex(c[valid_mask]))
-        return clean_pd_info
+    def _compute_clean_pd_info(self, clean_pc: torch.Tensor):
+        """Compute clean (teacher) persistence diagrams without gradient tracking."""
+        return compute_clean_teacher_batch(
+            clean_pc,
+            self.vr_complex,
+            teacher_mode=self.teacher_mode,
+            distance_backend=self.distance_backend,
+            ellphi_differentiable=self.ellphi_differentiable,
+            local_pca_k=self.teacher_local_pca_k,
+            max_points=self.topo_loss_max_points,
+            need_clean_scales=(self.topo_scale_mode == "median"),
+        )
 
     def train_epoch(self, data_loader, epoch):
         self.model.train()
@@ -125,6 +179,7 @@ class Trainer:
         total_topo_loss = 0
         total_aniso_loss = 0
         total_size_loss = 0
+        total_min_b_loss = 0
         steps_completed = 0
 
         all_train_preds = []
@@ -155,9 +210,10 @@ class Trainer:
             self.optimizer.zero_grad(set_to_none=True)
 
             clean_pd_info = None
+            clean_scales = None
             if self.lambda_topo > 0 and epoch > self.warmup_epochs:
                 # Topological target PD does not require autograd; keep it out of AMP/grad graph.
-                clean_pd_info = self._compute_clean_pd_info(clean_pc)
+                clean_pd_info, clean_scales = self._compute_clean_pd_info(clean_pc)
 
             with torch.amp.autocast(
                 device_type=self.autocast_device_type,
@@ -169,17 +225,23 @@ class Trainer:
 
                 topo_loss = torch.tensor(0.0, device=self.device)
                 if clean_pd_info is not None:
-                    topo_loss = self.topo_loss_fn(data, params, logits, clean_pd_info)
+                    topo_loss = self.topo_loss_fn(
+                        data, params, logits, clean_pd_info, clean_scales=clean_scales
+                    )
 
                 # Regularization Losses (Size and Anisotropy only, as per slides)
                 if epoch > self.warmup_epochs:
                     size_loss = self.size_loss_fn(params)
                     aniso_loss = self.aniso_loss_fn(params)
+                    min_b_loss = self.min_b_loss_fn(params)
                 else:
                     size_loss = torch.tensor(0.0, device=self.device)
                     aniso_loss = torch.tensor(0.0, device=self.device)
+                    min_b_loss = torch.tensor(0.0, device=self.device)
 
-                loss = class_loss + topo_loss + aniso_loss + size_loss
+                loss = topo_loss + aniso_loss + size_loss + min_b_loss
+                if self.lambda_class > 0:
+                    loss = loss + self.lambda_class * class_loss
 
             if torch.isnan(loss):
                 logger.warning("NaN loss at epoch=%s batch_index=%s; skipping step", epoch, i)
@@ -202,13 +264,14 @@ class Trainer:
             total_topo_loss += topo_loss.item()
             total_aniso_loss += aniso_loss.item()
             total_size_loss += size_loss.item()
+            total_min_b_loss += min_b_loss.item()
             
             probs = torch.sigmoid(logits).squeeze(-1)
             preds = (probs > self.threshold).long()
             all_train_preds.extend(preds.cpu().numpy().flatten())
             all_train_labels.extend(labels.cpu().numpy().flatten())
 
-            pbar.set_postfix(loss=f"{loss.item():.4f}", cls=f"{class_loss.item():.4f}", topo=f"{topo_loss.item():.4f}", aniso=f"{aniso_loss.item():.4f}", size=f"{size_loss.item():.4f}")
+            pbar.set_postfix(loss=f"{loss.item():.4f}", cls=f"{class_loss.item():.4f}", topo=f"{topo_loss.item():.4f}", aniso=f"{aniso_loss.item():.4f}", size=f"{size_loss.item():.4f}", min_b=f"{min_b_loss.item():.4f}")
             if i % 10 == 0:
                 logger.debug(
                     "Step %s: loss=%.4f class=%.4f topo=%.4f aniso=%.4f size=%.4f",
@@ -254,7 +317,7 @@ class Trainer:
         )
 
         if epoch % self.visualize_every == 0:
-             visualize(self.model, self.device, data_loader.dataset, epoch, output_dir=self.output_dir, title_prefix=self.config['meta'].get('config_id', 'train'), sample_indices=self.fixed_indices, threshold=self.threshold)
+             visualize(self.model, self.device, data_loader.dataset, epoch, output_dir=self.output_dir, title_prefix=self.config['meta'].get('config_id', 'train'), sample_indices=self.fixed_indices, threshold=self.threshold, backend=self.distance_backend)
 
         return (
             avg_loss,
@@ -277,11 +340,20 @@ class Trainer:
         all_preds = []
         self._val_aniso_accum = 0.0
         self._val_size_accum = 0.0
+        total_topo_loss = 0.0
+        topo_steps = 0
 
         with torch.no_grad():
-            for data, labels, _ in data_loader:
+            for data, labels, clean_pc in data_loader:
                 data = data.to(self.device, non_blocking=True)
                 labels = labels.to(self.device, non_blocking=True)
+                clean_pc = clean_pc.to(self.device, non_blocking=True)
+
+                clean_pd_info = None
+                clean_scales = None
+                if self.lambda_topo > 0:
+                    clean_pd_info, clean_scales = self._compute_clean_pd_info(clean_pc)
+
                 with torch.amp.autocast(
                     device_type=self.autocast_device_type,
                     dtype=self.amp_dtype,
@@ -289,7 +361,19 @@ class Trainer:
                 ):
                     logits, params = self.model(data)
                     class_loss = self.class_loss_fn(logits, labels)
-                total_loss += class_loss.item()
+                    topo_loss = torch.tensor(0.0, device=self.device)
+                    if clean_pd_info is not None:
+                        topo_loss = self.topo_loss_fn(
+                            data,
+                            params,
+                            logits,
+                            clean_pd_info,
+                            clean_scales=clean_scales,
+                        )
+                total_loss += (self.lambda_class * class_loss).item()
+                if clean_pd_info is not None:
+                    total_topo_loss += topo_loss.item()
+                    topo_steps += 1
                 
                 aniso_loss = self.aniso_loss_fn(params)
                 size_loss = self.size_loss_fn(params)
@@ -308,6 +392,7 @@ class Trainer:
 
         avg_aniso = self._val_aniso_accum / num_batches
         avg_size = self._val_size_accum / num_batches
+        avg_topo_loss = total_topo_loss / topo_steps if topo_steps > 0 else 0.0
 
         recall = recall_score(all_labels, all_preds, zero_division=0)
         
@@ -315,5 +400,5 @@ class Trainer:
             all_labels, all_preds
         )
         
-        return avg_loss, recall, specificity, gmean, mcc, avg_aniso, avg_size
+        return avg_loss, recall, specificity, gmean, mcc, avg_aniso, avg_size, avg_topo_loss
 

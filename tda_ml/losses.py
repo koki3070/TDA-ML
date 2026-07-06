@@ -90,11 +90,15 @@ class SizeRegularizationLoss(nn.Module):
 
 class AnisotropyPenaltyLoss(nn.Module):
     """
-    Prevents ellipses from becoming too elongated by penalizing high aspect ratios.
-    
+    Shapes the ellipse aspect ratio. The direction of the effect depends on ``mode``.
+
     Modes:
-    - linear: Penalizes aspect ratio (major/minor) directly.
-    - barrier: Penalizes aspect ratio squared only above a certain threshold.
+    - linear: Penalizes aspect ratio (major/minor) directly -> drives ellipses toward circles.
+    - barrier: Penalizes aspect ratio squared only above ``barrier_threshold``
+      -> free below the threshold, strong push back above it.
+    - elongate: Minimizes minor/major (circularity) -> rewards elongation along the
+      local principal direction; circle (ratio=1) is the worst case. This reproduces the
+      legacy ``aniso_mode: elongate`` behavior that yielded data-aligned ellipses.
     """
     def __init__(self, weight=0.01, mode='linear', barrier_threshold=6.0):
         super().__init__()
@@ -109,16 +113,33 @@ class AnisotropyPenaltyLoss(nn.Module):
         axes = params[..., 0:2]
         major_axis = axes.max(dim=-1)[0]
         minor_axis = axes.min(dim=-1)[0]
-        
-        aspect_ratios = major_axis / (minor_axis + NUMERICAL_EPS)
-        
+
         if self.mode == 'barrier':
+            aspect_ratios = major_axis / (minor_axis + NUMERICAL_EPS)
             barrier_term = F.relu(aspect_ratios - self.barrier_threshold).pow(2).mean()
             loss = 10.0 * barrier_term
+        elif self.mode == 'elongate':
+            loss = (minor_axis / (major_axis + NUMERICAL_EPS)).mean()
         else:
+            aspect_ratios = major_axis / (minor_axis + NUMERICAL_EPS)
             loss = aspect_ratios.mean()
             
         return self.weight * loss
+
+class MinBRegularizationLoss(nn.Module):
+    """Penalize minor axis falling below ``target`` (legacy ``lambda_min_b`` / ``min_b_target``)."""
+
+    def __init__(self, weight: float = 0.0, target: float = 0.2):
+        super().__init__()
+        self.weight = weight
+        self.target = target
+
+    def forward(self, params: torch.Tensor) -> torch.Tensor:
+        if self.weight <= 0:
+            return torch.tensor(0.0, device=params.device)
+        axes = params[..., 0:2]
+        minor_axis = axes.min(dim=-1)[0]
+        return self.weight * F.relu(self.target - minor_axis).mean()
 
 class TopologicalLoss(nn.Module):
     """
@@ -139,36 +160,101 @@ class TopologicalLoss(nn.Module):
         weight=0.1,
         distance_backend: str = "mahalanobis",
         ellphi_differentiable: bool = True,
+        prob_weighting: bool = True,
+        eps_scale: float = 1.0,
+        scale_mode: str = "fixed",
+        max_points: int | None = None,
     ):
         super().__init__()
         self.weight = weight
         self.distance_backend = distance_backend.lower().strip()
         self.ellphi_differentiable = ellphi_differentiable
+        # When False, outlier-probability weighting of the distance matrix is
+        # disabled (probs=None). Only affects the ``mahalanobis`` backend; ``ellphi``
+        # never uses probs. Useful for a fair backend ablation against ellphi.
+        self.prob_weighting = prob_weighting
+        # Filtration-unit alignment between the predicted distance matrix (Mahalanobis
+        # or ellphi tangency units) and the Euclidean clean (teacher) PD. Legacy
+        # ``topo_eps_scale`` (v73 default 0.7022) multiplied D by a scalar; ``ellphi``
+        # tangency distances live on a different scale than Euclidean, so without this
+        # the topology loss is dominated by scale rather than shape.
+        #   - scale_mode="fixed":  D <- D * eps_scale  (scalar; eps_scale=1.0 == no-op)
+        #   - scale_mode="median": bring the *prediction* onto the teacher's Euclidean
+        #     scale: D <- D * (m_e / median(offdiag D)), where m_e is the median pairwise
+        #     Euclidean distance of the clean cloud (provided by the trainer as
+        #     ``clean_scales``). The teacher PD is left untouched. If m_e is unavailable,
+        #     fall back to D <- D / median(offdiag D) (per-sample unit median).
+        self.eps_scale = float(eps_scale)
+        self.scale_mode = str(scale_mode).strip().lower()
+        if self.scale_mode not in ("fixed", "median"):
+            raise ValueError(
+                f"scale_mode must be 'fixed' or 'median', got {scale_mode!r}"
+            )
+        # Legacy ``topo_loss_max_points``: subsample points before VR/Wasserstein.
+        self.max_points = int(max_points) if max_points is not None else None
+        if self.max_points is not None and self.max_points < 2:
+            raise ValueError(f"max_points must be >= 2, got {self.max_points}")
         self.vr_complex = VietorisRipsComplex(dim=1)
         self.wasserstein = WassersteinDistance(q=2)
 
-    def forward(self, points, params, logits, clean_pd_info):
+    def _rescale_distance_matrix(self, d_mat: torch.Tensor, clean_scale=None) -> torch.Tensor:
+        """Align the predicted distance matrix to the teacher PD filtration units.
+
+        ``clean_scale`` (m_e) is the median pairwise Euclidean distance of the teacher
+        cloud for this sample. In median mode the prediction is scaled so its median
+        matches m_e, i.e. it is brought onto the (untouched) teacher's Euclidean scale.
+        """
+        if self.scale_mode == "median":
+            off = d_mat[d_mat > 0]
+            if off.numel() == 0:
+                return d_mat
+            denom = torch.median(off).detach() + NUMERICAL_EPS
+            if clean_scale is not None:
+                return d_mat * (float(clean_scale) / denom)
+            return d_mat / denom
+        if self.eps_scale != 1.0:
+            return d_mat * self.eps_scale
+        return d_mat
+
+    def _subsample_points(
+        self,
+        points_i: torch.Tensor,
+        params_i: torch.Tensor,
+        logits_i: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        n = points_i.shape[0]
+        if self.max_points is None or n <= self.max_points:
+            return points_i, params_i, logits_i
+        idx = torch.randperm(n, device=points_i.device)[: self.max_points]
+        return points_i[idx], params_i[idx], logits_i[idx]
+
+    def forward(self, points, params, logits, clean_pd_info, clean_scales=None):
         if self.weight <= 0:
             return torch.tensor(0.0, device=points.device)
 
         batch_size = points.shape[0]
-        probs_outlier = torch.sigmoid(logits).squeeze(-1)
 
-        D_prime = compute_distance_matrix_batch(
-            points,
-            params,
-            probs=probs_outlier,
-            symmetrize="max",
-            backend=self.distance_backend,
-            ellphi_differentiable=self.ellphi_differentiable,
-        )
-        
         total_loss = 0.0
         valid_samples = 0
         topo_failures: list[tuple[int, str]] = []
 
         for i in range(batch_size):
-            d_mat = D_prime[i]
+            pts_i, par_i, logits_i = self._subsample_points(
+                points[i], params[i], logits[i]
+            )
+            probs_i = (
+                torch.sigmoid(logits_i).squeeze(-1) if self.prob_weighting else None
+            )
+            d_batch = compute_distance_matrix_batch(
+                pts_i.unsqueeze(0),
+                par_i.unsqueeze(0),
+                probs=probs_i.unsqueeze(0) if probs_i is not None else None,
+                symmetrize="max",
+                backend=self.distance_backend,
+                ellphi_differentiable=self.ellphi_differentiable,
+            )
+            clean_scale_i = clean_scales[i] if clean_scales is not None else None
+            d_mat = self._rescale_distance_matrix(d_batch[0], clean_scale=clean_scale_i)
             try:
                 pd_pred_info = self.vr_complex(d_mat, treat_as_distances=True)
                 loss_sample = self.wasserstein(pd_pred_info, clean_pd_info[i]) ** 2

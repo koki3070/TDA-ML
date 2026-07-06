@@ -9,6 +9,8 @@ import torch
 from tda_ml.checkpoint_io import extract_model_state_dict, load_torch_checkpoint
 from tda_ml.config import deep_update, load_config, model_kwargs_from_config
 from tda_ml.data_loader import NoisyMNISTDataset, create_data_loader
+from tda_ml.dbscan_eval import evaluate_model_grid
+from tda_ml.topo_wdist import topo_wdist_options_from_config
 from tda_ml.models import AnisotropicOutlierClassifier
 from tda_ml.seed_utils import set_global_seed
 from tda_ml.runtime_profile import build_runtime_profile
@@ -226,16 +228,50 @@ def main(config_name=None, config=None, trial=None, config_overrides=None):
 
     with open(metrics_path, 'w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(['epoch', 'train_loss', 'train_class_loss', 'train_topo_loss', 'train_aniso_loss', 'train_size_loss', 'val_loss', 'val_recall', 'val_mcc', 'val_aniso', 'val_size'])
+        writer.writerow([
+            'epoch', 'train_loss', 'train_class_loss', 'train_topo_loss',
+            'train_aniso_loss', 'train_size_loss', 'val_loss', 'val_recall',
+            'val_mcc', 'val_aniso', 'val_size', 'val_topo_loss', 'val_wdist',
+            'sel_eps', 'sel_min_samples',
+        ])
 
     # --- Training Loop ---
     epochs = config['training']['epochs']
-    save_every = config['outputs'].get('save_every', 10)
+    save_every = config['outputs'].get('save_every', 1)
     best_val_mcc = -1.0
     early_abort_cfg = config.get("training", {}).get("early_abort", {})
     metrics_history: list[dict] = []
     final_status = "completed"
     abort_report_path = None
+
+    # --- Model-selection (checkpoint) policy ---
+    # Prefer ``val_topo`` so the saved checkpoint matches the topology loss used
+    # during training (same ellphi/local_pca teacher PD as train_epoch).
+    # ``wdist`` / ``dbscan_mcc`` use DBSCAN + Euclidean inlier-point W-Dist
+    # (paper reporting metric; not the training objective).
+    #   metric: 'val_topo' | 'wdist' | 'dbscan_mcc' | 'threshold_mcc' | 'val_loss'
+    # 'threshold_mcc' reproduces the legacy behavior. The threshold MCC is always
+    # tracked separately for early-abort diagnostics regardless of this setting.
+    sel_cfg = (config.get("training", {}).get("selection") or {})
+    sel_metric = sel_cfg.get("metric", "threshold_mcc")
+    sel_eval_every = max(1, int(sel_cfg.get("eval_every", 1)))
+    sel_dbscan_cfg = (sel_cfg.get("dbscan") or {})
+    sel_eps_values = sel_dbscan_cfg.get("eps_values")
+    sel_min_samples_values = sel_dbscan_cfg.get("min_samples_values")
+    sel_backend = (
+        config.get("model", {}).get("topology_loss", {}).get("distance_backend", "mahalanobis")
+    )
+    sel_minimize = sel_metric in ("wdist", "val_loss", "val_topo")
+    best_sel_value = float("inf") if sel_minimize else -1.0
+    if sel_metric == "val_topo":
+        logger.info("Model selection: val_topo (same TopologicalLoss as training)")
+    elif sel_metric in ("wdist", "dbscan_mcc"):
+        logger.info(
+            "Model selection: %s via DBSCAN grid (backend=%s, eval_every=%d)",
+            sel_metric, sel_backend, sel_eval_every,
+        )
+    else:
+        logger.info("Model selection: %s", sel_metric)
 
     for epoch in range(1, epochs + 1):
         # res returns (avg_loss, class_loss, topo_loss, aniso_loss, size_loss, ...)
@@ -243,9 +279,13 @@ def main(config_name=None, config=None, trial=None, config_overrides=None):
         val_res = trainer.validate(val_loader)
 
         val_mcc = val_res[4] # MCC is at index 4
+        val_topo_loss = val_res[7]
         train_mcc = res[10]
         val_recall = val_res[1]
-        print(f"Epoch {epoch}: Val MCC={val_mcc:.4f}, Aniso={val_res[5]:.4f}")
+        print(
+            f"Epoch {epoch}: Val MCC={val_mcc:.4f}, Val topo={val_topo_loss:.4f}, "
+            f"Aniso={val_res[5]:.4f}"
+        )
 
         metrics_history.append(
             {
@@ -258,19 +298,90 @@ def main(config_name=None, config=None, trial=None, config_overrides=None):
                 "train_loss": float(res[0]),
                 "val_size": float(val_res[6]),
                 "val_aniso": float(val_res[5]),
+                "val_topo_loss": float(val_topo_loss),
             }
         )
 
-        # Save best model logic
+        # Track best threshold MCC for early-abort diagnostics (independent of
+        # the checkpoint-selection metric).
         if val_mcc > best_val_mcc:
             best_val_mcc = val_mcc
-            best_model_path = os.path.join(run_dir, 'best_model.pth')
-            torch.save({
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'val_mcc': val_mcc,
-            }, best_model_path)
-            print(f"Saved best model (MCC: {val_mcc:.4f}) to {best_model_path}")
+
+        # --- Checkpoint selection ---
+        run_sel_eval = (epoch % sel_eval_every == 0) or (epoch == epochs)
+        sel_value = None
+        sel_eps = None
+        sel_min_samples = None
+        sel_wdist = None
+        sel_mcc_dbscan = None
+        if sel_metric == "threshold_mcc":
+            sel_value = float(val_mcc)
+        elif sel_metric == "val_loss":
+            sel_value = float(val_res[0])
+        elif sel_metric == "val_topo":
+            sel_value = float(val_topo_loss)
+            print(f"Epoch {epoch}: selection[val_topo] val_topo_loss={sel_value:.5f}")
+        elif sel_metric in ("wdist", "dbscan_mcc") and run_sel_eval:
+            objective = "wdist" if sel_metric == "wdist" else "mcc"
+            grid = evaluate_model_grid(
+                model,
+                val_loader,
+                device,
+                backend=sel_backend,
+                eps_values=sel_eps_values,
+                min_samples_values=sel_min_samples_values,
+                objective=objective,
+                topo_options=topo_wdist_options_from_config(config),
+            )
+            sel_eps = grid.eps
+            sel_min_samples = grid.min_samples
+            sel_wdist = grid.wdist
+            sel_mcc_dbscan = grid.mcc
+            sel_value = grid.wdist if objective == "wdist" else grid.mcc
+            print(
+                f"Epoch {epoch}: selection[{sel_metric}] val_wdist={grid.wdist:.5f} "
+                f"val_mcc_dbscan={grid.mcc:.4f} (eps={grid.eps:.3f}, min_samples={grid.min_samples})"
+            )
+
+        if sel_value is not None:
+            is_better = (
+                sel_value < best_sel_value if sel_minimize else sel_value > best_sel_value
+            )
+            if is_better:
+                best_sel_value = sel_value
+                best_model_path = os.path.join(run_dir, 'best_model.pth')
+                ckpt = {
+                    'epoch': epoch,
+                    'model_state_dict': model.state_dict(),
+                    'val_mcc': float(val_mcc),
+                    'selection_metric': sel_metric,
+                    'selection_value': float(sel_value),
+                }
+                if sel_metric == "val_topo":
+                    ckpt['val_topo_loss'] = float(sel_value)
+                if sel_eps is not None:
+                    ckpt['dbscan_eps'] = float(sel_eps)
+                    ckpt['dbscan_min_samples'] = int(sel_min_samples)
+                    ckpt['val_wdist'] = float(sel_wdist)
+                    ckpt['val_mcc_dbscan'] = float(sel_mcc_dbscan)
+                    hp_path = os.path.join(log_dir, 'dbscan_hparams_train.json')
+                    with open(hp_path, 'w', encoding='utf-8') as f:
+                        json.dump(
+                            {
+                                'eps': float(sel_eps),
+                                'min_samples': int(sel_min_samples),
+                                'backend': sel_backend,
+                                'epoch': epoch,
+                                'val_wdist': float(sel_wdist),
+                                'val_mcc_dbscan': float(sel_mcc_dbscan),
+                                'selection_metric': sel_metric,
+                            },
+                            f,
+                            ensure_ascii=True,
+                            indent=2,
+                        )
+                torch.save(ckpt, best_model_path)
+                print(f"Saved best model ({sel_metric}={sel_value:.5f}) to {best_model_path}")
 
         if epoch % save_every == 0:
             checkpoint_path = os.path.join(run_dir, f'checkpoint_epoch_{epoch}.pth')
@@ -283,7 +394,14 @@ def main(config_name=None, config=None, trial=None, config_overrides=None):
 
         with open(metrics_path, 'a', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow([epoch, res[0], res[1], res[2], res[3], res[4], val_res[0], val_res[1], val_res[4], val_res[5], val_res[6]])
+            writer.writerow([
+                epoch, res[0], res[1], res[2], res[3], res[4],
+                val_res[0], val_res[1], val_res[4], val_res[5], val_res[6],
+                val_res[7],
+                '' if sel_wdist is None else sel_wdist,
+                '' if sel_eps is None else sel_eps,
+                '' if sel_min_samples is None else sel_min_samples,
+            ])
 
         do_abort, abort_reason = should_early_abort(
             epoch=epoch,
@@ -354,6 +472,7 @@ def main(config_name=None, config=None, trial=None, config_overrides=None):
         test_mcc,
         test_aniso,
         test_size,
+        test_topo_loss,
     ) = test_res
     test_metrics = {
         "test_loss": test_loss,
@@ -363,6 +482,7 @@ def main(config_name=None, config=None, trial=None, config_overrides=None):
         "test_mcc": test_mcc,
         "test_aniso": test_aniso,
         "test_size": test_size,
+        "test_topo_loss": test_topo_loss,
     }
     test_metrics_path = os.path.join(log_dir, "test_metrics.json")
     with open(test_metrics_path, "w", encoding="utf-8") as f:

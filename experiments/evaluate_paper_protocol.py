@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Paper-aligned evaluation: ellphi DBSCAN inference + MCC / G-Mean / W-Dist.
+Paper-aligned evaluation: ellphi DBSCAN inference + MCC / G-Mean / topo W-Dist.
 
-Trainer ``val_mcc`` uses sigmoid(logit) > threshold; the paper reports metrics
-after DBSCAN on the learned ellphi precomputed distance matrix.
+W-Dist matches ``TopologicalLoss``: learned ellipses on the full noisy cloud vs
+clean teacher PD (local PCA + ellphi by default). DBSCAN affects MCC only.
 
 Usage::
 
     uv run python experiments/evaluate_paper_protocol.py \\
-        --run-dir outputs/paper_reproduce_1week_tuned/backend_ellphi_seed42_* \\
+        --run-dir outputs/supervised/20260627/055936_paper_reproduce_1week_tuned/backend_ellphi_seed42_* \\
         --base-config reproduce \\
         --split val
 
@@ -36,6 +36,7 @@ from tda_ml.metrics import compute_recall_specificity_gmean_mcc_wdist
 from tda_ml.models import AnisotropicOutlierClassifier
 from tda_ml.seed_utils import set_global_seed
 from tda_ml.supervised_diagnostics import git_revision
+from tda_ml.topo_wdist import TopoWdistOptions, topo_wdist_options_from_config
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -83,6 +84,7 @@ def evaluate_cloud_dbscan(
     min_samples: int,
     backend: str = "ellphi",
     metric: str = "max",
+    topo_options: TopoWdistOptions | None = None,
 ) -> CloudMetrics:
     db_labels = apply_anisotropic_dbscan(
         points,
@@ -93,12 +95,13 @@ def evaluate_cloud_dbscan(
         backend=backend,
     )
     pred = dbscan_labels_to_outlier_pred(db_labels)
-    gt_inliers = _valid_clean_inliers(clean_pc)
     recall, specificity, gmean, mcc, wdist = compute_recall_specificity_gmean_mcc_wdist(
         labels_gt,
         pred,
         points=points,
-        gt_inliers=gt_inliers,
+        params=params,
+        clean_pc=clean_pc,
+        topo_options=topo_options,
     )
     return CloudMetrics(recall, specificity, gmean, mcc, wdist)
 
@@ -125,7 +128,6 @@ def build_split_loader(config: dict[str, Any], split: str, device: torch.device)
     test_size = int(data_cfg.get("test_size", 1000))
     generator = torch.Generator().manual_seed(seed)
     full_train_indices = torch.randperm(60000, generator=generator)[: train_size + val_size]
-    train_indices = full_train_indices[:train_size]
     val_indices = full_train_indices[train_size:]
     test_indices = torch.randperm(10000, generator=generator)[:test_size]
 
@@ -164,8 +166,13 @@ def build_split_loader(config: dict[str, Any], split: str, device: torch.device)
     return loader
 
 
-def load_model_from_run(run_dir: Path, config: dict[str, Any], device: torch.device) -> AnisotropicOutlierClassifier:
-    ckpt_path = run_dir / "best_model.pth"
+def load_model_from_run(
+    run_dir: Path,
+    config: dict[str, Any],
+    device: torch.device,
+    checkpoint_name: str = "best_model.pth",
+) -> AnisotropicOutlierClassifier:
+    ckpt_path = run_dir / checkpoint_name
     if not ckpt_path.is_file():
         raise FileNotFoundError(f"Missing checkpoint: {ckpt_path}")
     model = AnisotropicOutlierClassifier(**model_kwargs_from_config(config))
@@ -205,6 +212,7 @@ def grid_search_dbscan(
     eps_values: list[float],
     min_samples_values: list[int],
     backend: str = "ellphi",
+    topo_options: TopoWdistOptions | None = None,
 ) -> tuple[float, int, float]:
     best_mcc = -1.0
     best_eps = eps_values[0]
@@ -224,6 +232,7 @@ def grid_search_dbscan(
                         eps=eps,
                         min_samples=min_samples,
                         backend=backend,
+                        topo_options=topo_options,
                     )
                     per_cloud.append(m)
                 except Exception as exc:  # noqa: BLE001 — log and skip bad hparams
@@ -268,10 +277,12 @@ def evaluate_split(
     eps_values: list[float] | None = None,
     min_samples_values: list[int] | None = None,
     backend: str = "ellphi",
+    checkpoint_name: str = "best_model.pth",
 ) -> SplitMetrics:
     loader = build_split_loader(config, split, device)
-    model = load_model_from_run(run_dir, config, device)
+    model = load_model_from_run(run_dir, config, device, checkpoint_name=checkpoint_name)
     clouds = list(iter_cloud_predictions(model, loader, device))
+    topo_options = topo_wdist_options_from_config(config)
 
     if split == "val":
         eps_values = eps_values or list(np.linspace(0.15, 1.5, 15))
@@ -281,6 +292,7 @@ def evaluate_split(
             eps_values=eps_values,
             min_samples_values=min_samples_values,
             backend=backend,
+            topo_options=topo_options,
         )
     else:
         if eps is None or min_samples is None:
@@ -297,6 +309,7 @@ def evaluate_split(
                 eps=float(eps),
                 min_samples=int(min_samples),
                 backend=backend,
+                topo_options=topo_options,
             )
         )
     recall, specificity, gmean, mcc, wdist = _aggregate_cloud_metrics(per_cloud)
@@ -334,6 +347,35 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--seed", type=int, default=None, help="Override data.seed (else run_manifest)")
     p.add_argument("--backend", type=str, default="ellphi", choices=["ellphi", "mahalanobis"])
     p.add_argument(
+        "--checkpoint-name",
+        type=str,
+        default="best_model.pth",
+        help="Checkpoint filename inside run-dir (e.g. final_model.pth).",
+    )
+    p.add_argument(
+        "--eps-values",
+        type=float,
+        nargs="+",
+        default=None,
+        help="Override DBSCAN eps grid for val grid search (default linspace(0.15,1.5,15)).",
+    )
+    p.add_argument(
+        "--min-samples-values",
+        type=int,
+        nargs="+",
+        default=None,
+        help="Override DBSCAN min_samples grid for val grid search (default 3 5 7 10 15).",
+    )
+    p.add_argument(
+        "--tag",
+        type=str,
+        default=None,
+        help=(
+            "Optional suffix for output files (dbscan_hparams_<tag>.json, "
+            "paper_metrics_<split>_<tag>.json) to avoid clobbering originals."
+        ),
+    )
+    p.add_argument(
         "--dbscan-hparams",
         type=Path,
         default=None,
@@ -352,10 +394,13 @@ def main() -> int:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     config = load_run_config(run_dir, args.base_config, args.seed)
 
+    tag_suffix = f"_{args.tag}" if args.tag else ""
+    hparams_name = f"dbscan_hparams{tag_suffix}.json"
+
     eps = min_samples = None
     if args.split == "test":
         if args.dbscan_hparams is None:
-            args.dbscan_hparams = run_dir / "logs" / "dbscan_hparams.json"
+            args.dbscan_hparams = run_dir / "logs" / hparams_name
         hparams = json.loads(args.dbscan_hparams.read_text())
         eps = float(hparams["eps"])
         min_samples = int(hparams["min_samples"])
@@ -367,20 +412,24 @@ def main() -> int:
         device,
         eps=eps,
         min_samples=min_samples,
+        eps_values=args.eps_values,
+        min_samples_values=args.min_samples_values,
         backend=args.backend,
+        checkpoint_name=args.checkpoint_name,
     )
 
     log_dir = run_dir / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
 
     if args.split == "val":
-        hparams_path = log_dir / "dbscan_hparams.json"
+        hparams_path = log_dir / hparams_name
         hparams_path.write_text(
             json.dumps(
                 {
                     "eps": metrics.dbscan_eps,
                     "min_samples": metrics.dbscan_min_samples,
                     "backend": metrics.backend,
+                    "checkpoint_name": args.checkpoint_name,
                     "mean_val_mcc_dbscan": metrics.mcc,
                     "selection": "max mean cloud MCC on validation split",
                 },
@@ -390,11 +439,12 @@ def main() -> int:
         )
         print(f"Saved DBSCAN hparams: {hparams_path}")
 
-    out_path = args.out_json or log_dir / f"paper_metrics_{args.split}.json"
+    out_path = args.out_json or log_dir / f"paper_metrics_{args.split}{tag_suffix}.json"
     payload = {
         "source_revision": git_revision(REPO_ROOT),
         "run_dir": str(run_dir),
         "split": args.split,
+        "checkpoint_name": args.checkpoint_name,
         **asdict(metrics),
     }
     out_path.write_text(json.dumps(payload, indent=2) + "\n")

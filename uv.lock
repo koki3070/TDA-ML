@@ -354,37 +354,37 @@ wheels = [
 
 [package.optional-dependencies]
 cublas = [
-    { name = "nvidia-cublas", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "nvidia-cublas" },
 ]
 cudart = [
-    { name = "nvidia-cuda-runtime", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "nvidia-cuda-runtime" },
 ]
 cufft = [
-    { name = "nvidia-cufft", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "nvidia-cufft" },
 ]
 cufile = [
-    { name = "nvidia-cufile", marker = "sys_platform == 'linux'" },
+    { name = "nvidia-cufile" },
 ]
 cupti = [
-    { name = "nvidia-cuda-cupti", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "nvidia-cuda-cupti" },
 ]
 curand = [
-    { name = "nvidia-curand", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "nvidia-curand" },
 ]
 cusolver = [
-    { name = "nvidia-cusolver", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "nvidia-cusolver" },
 ]
 cusparse = [
-    { name = "nvidia-cusparse", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "nvidia-cusparse" },
 ]
 nvjitlink = [
-    { name = "nvidia-nvjitlink", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "nvidia-nvjitlink" },
 ]
 nvrtc = [
-    { name = "nvidia-cuda-nvrtc", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "nvidia-cuda-nvrtc" },
 ]
 nvtx = [
-    { name = "nvidia-nvtx", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { name = "nvidia-nvtx" },
 ]
 
 [[package]]
@@ -474,18 +474,30 @@ wheels = [
 [[package]]
 name = "ellphi"
 version = "0.1.2"
-source = { registry = "https://pypi.org/simple" }
+source = { editable = "ellphi_repo" }
 dependencies = [
     { name = "joblib" },
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "scipy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/eb/b1/588ca20ea40115e486e42c2b222da1a3e2d8a54717c529aa8d3e5f90edeb/ellphi-0.1.2.tar.gz", hash = "sha256:c8bc7e9a85683fc0cec036b680a45407a10cf7c06ec059a6f9a9cd9c4cdba116", size = 41292, upload-time = "2026-03-25T07:44:53.115Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/a0/14/dc242856414c9f9f2c027417230c3973f85951e08c9e822ead2a6ef4e439/ellphi-0.1.2-cp312-cp312-manylinux_2_39_x86_64.whl", hash = "sha256:b063e735532df6092e6cf03a8c774faeface907d0fce67176b2d6e349e2187c9", size = 1111921, upload-time = "2026-03-25T07:44:50.37Z" },
-    { url = "https://files.pythonhosted.org/packages/26/23/40ef263eb40dc361b7ec8b88b27c3cea291e005a2310622db2e361292aba/ellphi-0.1.2-cp312-cp312-win_amd64.whl", hash = "sha256:8a1024539b5282fc50339a31a9f08c6e9ae2237ab5c43642eb695c0795925222", size = 52159, upload-time = "2026-03-25T07:44:52.104Z" },
+
+[package.metadata]
+requires-dist = [
+    { name = "homcloud", marker = "extra == 'demo'", specifier = ">=4.8.0" },
+    { name = "ipykernel", marker = "extra == 'demo'", specifier = ">=6.28" },
+    { name = "joblib", specifier = ">=1.3" },
+    { name = "jupyterlab", marker = "extra == 'demo'", specifier = ">=4.1" },
+    { name = "matplotlib", specifier = ">=3.9" },
+    { name = "nbformat", marker = "extra == 'demo'", specifier = ">=5.10" },
+    { name = "numpy", specifier = ">=1.26" },
+    { name = "pandas", marker = "extra == 'demo'", specifier = ">=2.2.0" },
+    { name = "plotly", marker = "extra == 'demo'", specifier = ">=5.22" },
+    { name = "scipy", specifier = ">=1.12" },
+    { name = "seaborn", marker = "extra == 'demo'", specifier = ">=0.13" },
+    { name = "tqdm", marker = "extra == 'demo'", specifier = ">=4.67.1" },
 ]
+provides-extras = ["demo"]
 
 [[package]]
 name = "filelock"
@@ -1410,10 +1422,10 @@ resolution-markers = [
     "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "numpy", marker = "python_full_version >= '3.14'" },
-    { name = "python-dateutil", marker = "python_full_version >= '3.14'" },
-    { name = "pytz", marker = "python_full_version >= '3.14'" },
-    { name = "tzdata", marker = "python_full_version >= '3.14'" },
+    { name = "numpy" },
+    { name = "python-dateutil" },
+    { name = "pytz" },
+    { name = "tzdata" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/33/01/d40b85317f86cf08d853a4f495195c73815fdf205eef3993821720274518/pandas-2.3.3.tar.gz", hash = "sha256:e05e1af93b977f7eafa636d043f9f94c7ee3ac81af99c13508215942e64c993b", size = 4495223, upload-time = "2025-09-29T23:34:51.853Z" }
 wheels = [
@@ -1462,9 +1474,9 @@ resolution-markers = [
     "python_full_version < '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "numpy", marker = "python_full_version < '3.14'" },
-    { name = "python-dateutil", marker = "python_full_version < '3.14'" },
-    { name = "tzdata", marker = "(python_full_version < '3.14' and sys_platform == 'emscripten') or (python_full_version < '3.14' and sys_platform == 'win32')" },
+    { name = "numpy" },
+    { name = "python-dateutil" },
+    { name = "tzdata", marker = "sys_platform == 'emscripten' or sys_platform == 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/da/99/b342345300f13440fe9fe385c3c481e2d9a595ee3bab4d3219247ac94e9a/pandas-3.0.2.tar.gz", hash = "sha256:f4753e73e34c8d83221ba58f232433fca2748be8b18dbca02d242ed153945043", size = 4645855, upload-time = "2026-03-31T06:48:30.816Z" }
 wheels = [
@@ -2326,7 +2338,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "ellphi", specifier = "==0.1.2" },
+    { name = "ellphi", editable = "ellphi_repo" },
     { name = "gudhi", specifier = ">=3.4" },
     { name = "homcloud", marker = "extra == 'repro-pd-animation'", specifier = ">=4.8" },
     { name = "joblib", marker = "extra == 'experiments'", specifier = ">=1.3" },

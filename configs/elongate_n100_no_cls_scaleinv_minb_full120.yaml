@@ -1,0 +1,63 @@
+# median + min_b, NO topo_loss_max_points → full cloud (120 pts) for topo loss.
+# Ablation: compare against minb_topo12 (12-pt subsampling).
+
+meta:
+  config_id: "elongate_n100_no_cls_scaleinv_minb_full120"
+
+model:
+  point_dim: 2
+  feature_dim: 128
+  ellipse_param_dim: 5
+  threshold: 0.5
+  topology_loss:
+    metric_type: "anisotropic"
+    distance_backend: "mahalanobis"
+    ellphi_differentiable: true
+    prob_weighting: false
+
+loss:
+  w_class: 0.0
+  w_topo: 0.0883
+  w_aniso: 0.0541
+  w_size: 0.488
+  w_min_b: 5.6525
+  min_b_target: 0.05
+  pos_weight: 1.0
+  aniso_mode: "elongate"
+  topo_scale_mode: "median"
+  topo_eps_scale: 1.0
+
+training:
+  lr: 0.000158
+  epochs: 30
+  grad_clip_value: 1.0
+  visualize_every: 10
+  warmup_epochs: 0
+  # topo_loss_max_points なし → 全120点
+  selection:
+    metric: wdist
+    eval_every: 1
+    dbscan:
+      eps_values: null
+      min_samples_values: null
+
+data:
+  max_points: 100
+  num_outliers: 20
+  noise_std: 0.01
+  seed: 42
+  train_size: 4500
+  val_size: 500
+  test_size: 1000
+  num_workers: 2
+  batch_size: 64
+  pin_memory: true
+
+performance:
+  cudnn_benchmark: true
+  enable_tf32: true
+  matmul_precision: high
+
+outputs:
+  base_dir: "outputs"
+  save_every: 1

@@ -6,6 +6,7 @@ import numpy as np
 from sklearn.metrics import confusion_matrix, matthews_corrcoef, recall_score
 
 from tda_ml.persistence import compute_w_distance
+from tda_ml.topo_wdist import TopoWdistOptions, compute_topo_wdist
 
 
 def compute_recall_specificity_gmean_mcc(
@@ -31,23 +32,28 @@ def compute_recall_specificity_gmean_mcc_wdist(
     labels_pred: Sequence[int] | np.ndarray,
     *,
     points: np.ndarray | None = None,
+    params: np.ndarray | None = None,
+    clean_pc: np.ndarray | None = None,
+    topo_options: TopoWdistOptions | None = None,
     gt_inliers: np.ndarray | None = None,
 ) -> tuple[float, float, float, float, float]:
     """
     Return the four classification metrics plus W-Dist.
 
-    W-Dist is the H1 1-Wasserstein distance between persistence diagrams of
-    predicted inliers and ``gt_inliers``.  It is computed only when ``points``
-    and ``gt_inliers`` are provided; otherwise ``w_dist`` is ``0.0``.
-    An empty predicted-inlier set uses the standard OT distance
-    ``W(empty_diagram, PD(gt_inliers))`` — see
-    :func:`tda_ml.persistence.compute_w_distance`.
+    When ``params`` and ``clean_pc`` are provided, W-Dist is the ellipse-filtration
+    distance (``compute_topo_wdist``): learned ellipses on the full cloud vs the
+    clean teacher PD — same definition as ``TopologicalLoss``.
+
+    When only ``gt_inliers`` is provided (legacy baselines), W-Dist uses Euclidean
+    Alpha-complex PDs on DBSCAN-predicted inlier **point coordinates**.
     """
     recall, specificity, gmean, mcc = compute_recall_specificity_gmean_mcc(
         labels_gt, labels_pred
     )
     w_dist = 0.0
-    if points is not None and gt_inliers is not None:
+    if points is not None and params is not None and clean_pc is not None:
+        w_dist = float(compute_topo_wdist(points, params, clean_pc, topo_options))
+    elif points is not None and gt_inliers is not None:
         pred_inliers = points[np.asarray(labels_pred) == 0]
         w_dist = float(compute_w_distance(pred_inliers, gt_inliers))
     return recall, specificity, gmean, mcc, w_dist

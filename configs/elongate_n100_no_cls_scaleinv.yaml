@@ -1,0 +1,74 @@
+# Scale-invariant variant of elongate_n100_no_cls.yaml.
+#
+# Root-cause fix for "ellphi W-Dist does not improve during training": the predicted
+# topology distance matrix (Mahalanobis or ellphi tangency units) lives on a different
+# scale than the Euclidean clean (teacher) PD. The legacy pipeline aligned them with a
+# scalar `topo_eps_scale` (v73=0.7022). Here we use the backend-agnostic, tuning-free
+# `topo_scale_mode: median`: the *prediction* is rescaled onto the teacher's Euclidean
+# scale, D <- D * (m_e / median(D)), where m_e is the median pairwise Euclidean distance
+# of the clean cloud. The teacher PD is left untouched. This removes the metric/unit
+# mismatch that previously dominated the ellphi topology loss.
+#
+# Everything else matches elongate_n100_no_cls.yaml for a fair before/after comparison.
+
+meta:
+  config_id: "elongate_n100_no_cls_scaleinv"
+
+model:
+  point_dim: 2
+  feature_dim: 128
+  ellipse_param_dim: 5
+  threshold: 0.5
+  topology_loss:
+    metric_type: "anisotropic"
+    distance_backend: "mahalanobis"  # overridden per run by run_backend_multiseed
+    ellphi_differentiable: true
+    prob_weighting: false
+
+loss:
+  w_class: 0.0
+  w_topo: 0.0883
+  w_aniso: 0.0541
+  w_size: 0.488
+  pos_weight: 1.0
+  aniso_mode: "elongate"
+  # Filtration-unit alignment between predicted matrix and Euclidean teacher PD.
+  #   median: rescale prediction onto teacher's Euclidean scale, teacher untouched
+  #           (recommended, backend-agnostic, tuning-free)
+  #   fixed:  D <- D * topo_eps_scale (legacy behavior; set topo_scale_mode: fixed)
+  topo_scale_mode: "median"
+  topo_eps_scale: 1.0
+
+training:
+  lr: 0.000158
+  epochs: 30
+  grad_clip_value: 1.0
+  visualize_every: 10
+  warmup_epochs: 0
+  selection:
+    metric: wdist
+    eval_every: 1
+    dbscan:
+      eps_values: null
+      min_samples_values: null
+
+data:
+  max_points: 100
+  num_outliers: 20
+  noise_std: 0.01
+  seed: 42
+  train_size: 4500
+  val_size: 500
+  test_size: 1000
+  num_workers: 2
+  batch_size: 64
+  pin_memory: true
+
+performance:
+  cudnn_benchmark: true
+  enable_tf32: true
+  matmul_precision: high
+
+outputs:
+  base_dir: "outputs"
+  save_every: 1

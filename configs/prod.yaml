@@ -42,4 +42,4 @@ device: "cpu"
 
 outputs:
   base_dir: "outputs/prod"
-  save_every: 10
+  save_every: 1

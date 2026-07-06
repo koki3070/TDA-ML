@@ -1,0 +1,151 @@
+"""Ellipse-filtration W-Dist (prediction PD vs clean teacher PD).
+
+Same definition as ``TopologicalLoss``: predicted ellipses on the (noisy) cloud
+vs teacher PD from ``compute_clean_teacher_batch`` (e.g. local PCA + ellphi).
+DBSCAN is **not** involved in this metric.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+import numpy as np
+import torch
+from torch_topological.nn import VietorisRipsComplex, WassersteinDistance
+
+from tda_ml.distance_backend import compute_distance_matrix_batch
+from tda_ml.numerical_eps import NUMERICAL_EPS
+from tda_ml.teacher_pd import compute_clean_teacher_batch
+
+
+@dataclass(frozen=True)
+class TopoWdistOptions:
+    teacher_mode: str = "local_pca"
+    distance_backend: str = "ellphi"
+    teacher_local_pca_k: int = 10
+    eps_scale: float = 1.0
+    scale_mode: str = "fixed"
+    max_points: int | None = None
+    prob_weighting: bool = False
+
+
+def topo_wdist_options_from_config(config: dict[str, Any]) -> TopoWdistOptions:
+    loss_cfg = config.get("loss", {})
+    training_cfg = config.get("training", {})
+    topo_cfg = config.get("model", {}).get("topology_loss", {})
+    max_pts = training_cfg.get("topo_loss_max_points", loss_cfg.get("topo_loss_max_points"))
+    return TopoWdistOptions(
+        teacher_mode=str(
+            loss_cfg.get("teacher_mode", training_cfg.get("teacher_mode", "local_pca"))
+        ).strip().lower(),
+        distance_backend=str(topo_cfg.get("distance_backend", "mahalanobis")).lower().strip(),
+        teacher_local_pca_k=int(
+            loss_cfg.get(
+                "teacher_local_pca_k",
+                training_cfg.get("teacher_local_pca_k", 10),
+            )
+        ),
+        eps_scale=float(
+            loss_cfg.get("topo_eps_scale", training_cfg.get("topo_eps_scale", 1.0))
+        ),
+        scale_mode=str(
+            loss_cfg.get("topo_scale_mode", training_cfg.get("topo_scale_mode", "fixed"))
+        ).strip().lower(),
+        max_points=int(max_pts) if max_pts is not None else None,
+        prob_weighting=bool(topo_cfg.get("prob_weighting", True)),
+    )
+
+
+def _rescale_distance_matrix(
+    d_mat: torch.Tensor,
+    *,
+    scale_mode: str,
+    eps_scale: float,
+    clean_scale: float | None,
+) -> torch.Tensor:
+    if scale_mode == "median":
+        off = d_mat[d_mat > 0]
+        if off.numel() == 0:
+            return d_mat
+        denom = torch.median(off).detach() + NUMERICAL_EPS
+        if clean_scale is not None:
+            return d_mat * (float(clean_scale) / denom)
+        return d_mat / denom
+    if eps_scale != 1.0:
+        return d_mat * eps_scale
+    return d_mat
+
+
+def _subsample_cloud(
+    points: torch.Tensor,
+    params: torch.Tensor,
+    max_points: int | None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    n = points.shape[0]
+    if max_points is None or n <= max_points:
+        return points, params
+    idx = torch.randperm(n, device=points.device)[:max_points]
+    return points[idx], params[idx]
+
+
+def compute_topo_wdist(
+    points: np.ndarray,
+    params: np.ndarray,
+    clean_pc: np.ndarray,
+    options: TopoWdistOptions | None = None,
+) -> float:
+    """
+    Wasserstein-2 distance between H1 PDs (same units as ``TopologicalLoss`` term).
+
+    ``points`` / ``params``: full noisy cloud and learned ellipses (DBSCAN unused).
+    ``clean_pc``: padded clean inlier coordinates for the teacher PD.
+    """
+    opts = options or TopoWdistOptions()
+    pts = torch.as_tensor(points, dtype=torch.float32)
+    par = torch.as_tensor(params[..., :3], dtype=torch.float32)
+    clean = torch.as_tensor(clean_pc, dtype=torch.float32)
+
+    if pts.ndim != 2 or pts.shape[1] != 2:
+        raise ValueError(f"points must be (N, 2); got {pts.shape}")
+    if par.shape[0] != pts.shape[0]:
+        raise ValueError(f"params length {par.shape[0]} != points {pts.shape[0]}")
+
+    vr = VietorisRipsComplex(dim=1)
+    wdist_fn = WassersteinDistance(q=2)
+
+    with torch.no_grad():
+        clean_batch = clean.unsqueeze(0)
+        clean_pd_info, clean_scales = compute_clean_teacher_batch(
+            clean_batch,
+            vr,
+            teacher_mode=opts.teacher_mode,
+            distance_backend=opts.distance_backend,
+            ellphi_differentiable=False,
+            local_pca_k=opts.teacher_local_pca_k,
+            max_points=opts.max_points,
+            need_clean_scales=(opts.scale_mode == "median"),
+        )
+
+        pts_i, par_i = _subsample_cloud(pts, par, opts.max_points)
+        d_batch = compute_distance_matrix_batch(
+            pts_i.unsqueeze(0),
+            par_i.unsqueeze(0),
+            probs=None,
+            symmetrize="max",
+            backend=opts.distance_backend,
+            ellphi_differentiable=False,
+        )
+        clean_scale_i = clean_scales[0] if clean_scales is not None else None
+        d_mat = _rescale_distance_matrix(
+            d_batch[0],
+            scale_mode=opts.scale_mode,
+            eps_scale=opts.eps_scale,
+            clean_scale=clean_scale_i,
+        )
+        pd_pred = vr(d_mat, treat_as_distances=True)
+        w2_sq = wdist_fn(pd_pred, clean_pd_info[0]) ** 2
+        value = float(w2_sq.item())
+        if not np.isfinite(value):
+            raise RuntimeError("non-finite topo W-Dist")
+        return value

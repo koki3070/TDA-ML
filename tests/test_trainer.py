@@ -78,5 +78,32 @@ class TestTrainer(unittest.TestCase):
         self.assertTrue(params_updated, "Model weights were not updated after a training step.")
         self.assertGreater(avg_loss, 0.0)
 
+    def test_validate_reports_val_topo_loss(self):
+        val_res = self.trainer.validate(self.train_loader)
+        self.assertEqual(len(val_res), 8)
+        self.assertGreater(val_res[7], 0.0)
+
+    def test_w_class_zero_skips_classification_gradient(self):
+        """w_class=0 and prob_weighting=false must not update the classification head."""
+        self.config["loss"] = {"w_class": 0.0}
+        self.config["model"]["topology_loss"]["prob_weighting"] = False
+        trainer = Trainer(self.model, self.config, self.device)
+        self.assertEqual(trainer.lambda_class, 0.0)
+
+        cls_head_params = list(self.model.classification_head.parameters())
+        cls_before = [p.clone() for p in cls_head_params]
+        topo_before = [p.clone() for p in self.model.topology_head.parameters()]
+
+        trainer.train_epoch(self.train_loader, epoch=1)
+
+        cls_changed = any(
+            not torch.equal(b, p) for b, p in zip(cls_before, cls_head_params)
+        )
+        topo_changed = any(
+            not torch.equal(b, p) for b, p in zip(topo_before, self.model.topology_head.parameters())
+        )
+        self.assertFalse(cls_changed, "classification head should be frozen when w_class=0")
+        self.assertTrue(topo_changed, "topology head should still update when w_class=0")
+
 if __name__ == '__main__':
     unittest.main()

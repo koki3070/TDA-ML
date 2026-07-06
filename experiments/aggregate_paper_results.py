@@ -9,9 +9,9 @@ Reads test-split DBSCAN metrics (``logs/paper_metrics_test.json`` from
 Usage::
 
     uv run python experiments/aggregate_paper_results.py \\
-        --proposed-dir outputs/paper_reproduce_1week_tuned \\
+        --proposed-dir outputs/supervised/20260627/055936_paper_reproduce_1week_tuned \\
         --wtopo0-dir outputs/paper_wtopo0 \\
-        --baselines-csv outputs/paper_baselines/summary_baselines.csv
+        --baselines-csv outputs/supervised/20260623/155756_paper_baselines/summary_baselines.csv
 
 Writes ``summary_for_paper.csv`` and ``MANIFEST.md`` under ``--out-dir``
 (default: ``--proposed-dir``).
@@ -317,7 +317,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--proposed-dir",
         type=Path,
-        default=REPO_ROOT / "outputs" / "paper_reproduce_1week_tuned",
+        default=REPO_ROOT / "outputs" / "supervised" / "20260627" / "055936_paper_reproduce_1week_tuned",
         help="Main proposed runs (12ep × 5 seed, ellphi).",
     )
     p.add_argument(
@@ -329,7 +329,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--baselines-csv",
         type=Path,
-        default=REPO_ROOT / "outputs" / "paper_baselines" / "summary_baselines.csv",
+        default=REPO_ROOT / "outputs" / "supervised" / "20260623" / "155756_paper_baselines" / "summary_baselines.csv",
     )
     p.add_argument(
         "--out-dir",

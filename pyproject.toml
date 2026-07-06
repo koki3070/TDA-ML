@@ -42,6 +42,9 @@ packages = ["tda_ml"]
 
 [tool.uv.sources]
 torch_topological = { path = "pytorch-topological", editable = true }
+# Local fork of t-uda/ellphi (v0.1.2) adding a C++ pdist_tangency_grad kernel
+# (~175x faster differentiable tangency backward). See ellphi_repo/.
+ellphi = { path = "ellphi_repo", editable = true }
 
 [dependency-groups]
 dev = [
