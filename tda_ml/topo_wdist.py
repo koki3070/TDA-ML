@@ -14,8 +14,11 @@ import numpy as np
 import torch
 from torch_topological.nn import VietorisRipsComplex, WassersteinDistance
 
-from tda_ml.distance_backend import compute_distance_matrix_batch
-from tda_ml.numerical_eps import NUMERICAL_EPS
+from tda_ml.distance_backend import (
+    compute_distance_matrix_batch,
+    rescale_distance_matrix,
+    subsample_indices,
+)
 from tda_ml.teacher_pd import compute_clean_teacher_batch
 
 
@@ -57,35 +60,14 @@ def topo_wdist_options_from_config(config: dict[str, Any]) -> TopoWdistOptions:
     )
 
 
-def _rescale_distance_matrix(
-    d_mat: torch.Tensor,
-    *,
-    scale_mode: str,
-    eps_scale: float,
-    clean_scale: float | None,
-) -> torch.Tensor:
-    if scale_mode == "median":
-        off = d_mat[d_mat > 0]
-        if off.numel() == 0:
-            return d_mat
-        denom = torch.median(off).detach() + NUMERICAL_EPS
-        if clean_scale is not None:
-            return d_mat * (float(clean_scale) / denom)
-        return d_mat / denom
-    if eps_scale != 1.0:
-        return d_mat * eps_scale
-    return d_mat
-
-
 def _subsample_cloud(
     points: torch.Tensor,
     params: torch.Tensor,
     max_points: int | None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    n = points.shape[0]
-    if max_points is None or n <= max_points:
+    idx = subsample_indices(points.shape[0], max_points, device=points.device)
+    if idx is None:
         return points, params
-    idx = torch.randperm(n, device=points.device)[:max_points]
     return points[idx], params[idx]
 
 
@@ -137,7 +119,7 @@ def compute_topo_wdist(
             ellphi_differentiable=False,
         )
         clean_scale_i = clean_scales[0] if clean_scales is not None else None
-        d_mat = _rescale_distance_matrix(
+        d_mat = rescale_distance_matrix(
             d_batch[0],
             scale_mode=opts.scale_mode,
             eps_scale=opts.eps_scale,

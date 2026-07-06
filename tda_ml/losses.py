@@ -5,58 +5,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_topological.nn import VietorisRipsComplex, WassersteinDistance
 
-from tda_ml.distance_backend import compute_distance_matrix_batch
+from tda_ml.distance_backend import (
+    compute_distance_matrix_batch,
+    rescale_distance_matrix,
+    subsample_indices,
+)
 from tda_ml.numerical_eps import NUMERICAL_EPS
-from tda_ml.topology import compute_anisotropic_distance_matrix
 
-# Distance-mode aliases for topology loss (kept for config/test compatibility).
 logger = logging.getLogger(__name__)
-
-DISTANCE_MODE_MAHALANOBIS = "mahalanobis"
-DISTANCE_MODE_ELLPHI = "ellphi"
-
-
-def normalize_topo_distance_mode(mode: str) -> str:
-    m = str(mode).strip().lower()
-    if m == "mahalanobis":
-        return DISTANCE_MODE_MAHALANOBIS
-    if m == "ellphi":
-        return DISTANCE_MODE_ELLPHI
-    raise ValueError(f"Unknown topo distance mode: {mode!r}")
-
-
-def compute_topo_distance_matrix(
-    points: torch.Tensor,
-    params: torch.Tensor,
-    *,
-    distance_mode: str = "mahalanobis",
-    ellphi_backend: str = "auto",
-) -> torch.Tensor:
-    """
-    Shared topology-loss entrypoint: map batched points/ellipse params to ``(B,N,N)`` distances.
-
-    ``distance_mode`` is ``mahalanobis`` or ``ellphi``.
-    When ``ellphi_backend='auto'``, a differentiable ellphi path is preferred and
-    falls back to NumPy when unavailable.
-    """
-    backend = normalize_topo_distance_mode(distance_mode)
-    eb = str(ellphi_backend).strip().lower()
-    ellphi_diff = eb in ("auto", "torch", "grad", "differentiable", "1", "true", "yes")
-    return compute_distance_matrix_batch(
-        points,
-        params,
-        probs=None,
-        symmetrize="max",
-        backend=backend,
-        ellphi_differentiable=ellphi_diff,
-    )
-
-
-def mahalanobis_distance_matrix_batched(points: torch.Tensor, params: torch.Tensor) -> torch.Tensor:
-    """Mahalanobis-style batched distance matrix without probability weighting."""
-    return compute_anisotropic_distance_matrix(
-        points, params, probs=None, symmetrize="max"
-    )
 
 
 class ClassificationLoss(nn.Module):
@@ -198,23 +154,13 @@ class TopologicalLoss(nn.Module):
         self.wasserstein = WassersteinDistance(q=2)
 
     def _rescale_distance_matrix(self, d_mat: torch.Tensor, clean_scale=None) -> torch.Tensor:
-        """Align the predicted distance matrix to the teacher PD filtration units.
-
-        ``clean_scale`` (m_e) is the median pairwise Euclidean distance of the teacher
-        cloud for this sample. In median mode the prediction is scaled so its median
-        matches m_e, i.e. it is brought onto the (untouched) teacher's Euclidean scale.
-        """
-        if self.scale_mode == "median":
-            off = d_mat[d_mat > 0]
-            if off.numel() == 0:
-                return d_mat
-            denom = torch.median(off).detach() + NUMERICAL_EPS
-            if clean_scale is not None:
-                return d_mat * (float(clean_scale) / denom)
-            return d_mat / denom
-        if self.eps_scale != 1.0:
-            return d_mat * self.eps_scale
-        return d_mat
+        """See :func:`tda_ml.distance_backend.rescale_distance_matrix`."""
+        return rescale_distance_matrix(
+            d_mat,
+            scale_mode=self.scale_mode,
+            eps_scale=self.eps_scale,
+            clean_scale=clean_scale,
+        )
 
     def _subsample_points(
         self,
@@ -222,10 +168,9 @@ class TopologicalLoss(nn.Module):
         params_i: torch.Tensor,
         logits_i: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        n = points_i.shape[0]
-        if self.max_points is None or n <= self.max_points:
+        idx = subsample_indices(points_i.shape[0], self.max_points, device=points_i.device)
+        if idx is None:
             return points_i, params_i, logits_i
-        idx = torch.randperm(n, device=points_i.device)[: self.max_points]
         return points_i[idx], params_i[idx], logits_i[idx]
 
     def forward(self, points, params, logits, clean_pd_info, clean_scales=None):

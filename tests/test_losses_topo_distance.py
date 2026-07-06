@@ -3,7 +3,7 @@
 import unittest
 import torch
 
-from tda_ml.losses import (
+from tda_ml.distance_backend import (
     DISTANCE_MODE_ELLPHI,
     DISTANCE_MODE_MAHALANOBIS,
     compute_topo_distance_matrix,
@@ -117,7 +117,7 @@ class TestTopoEpsScale(unittest.TestCase):
         loss_fn = TopologicalLoss(weight=1.0, distance_backend="mahalanobis",
                                   prob_weighting=False, scale_mode="median")
         i = 0
-        from tda_ml.losses import compute_distance_matrix_batch
+        from tda_ml.distance_backend import compute_distance_matrix_batch
         D = compute_distance_matrix_batch(pt, par, probs=None, symmetrize="max",
                                           backend="mahalanobis")
         m_e = float(torch.pdist(pt[i]).median())

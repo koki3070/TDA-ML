@@ -19,6 +19,7 @@ from tda_ml.ellphi_torch import (
     pdist_tangency_matrix_differentiable,
 )
 from tda_ml.geometry import ellipse_params_to_centers_cov_numpy
+from tda_ml.numerical_eps import NUMERICAL_EPS
 from tda_ml.topology import compute_anisotropic_distance_matrix
 
 try:
@@ -32,6 +33,57 @@ except ImportError:
     squareform = None  # type: ignore[misc, assignment]
 
 _ELLPHI_PROB_WARNED = False
+
+DISTANCE_MODE_MAHALANOBIS = "mahalanobis"
+DISTANCE_MODE_ELLPHI = "ellphi"
+
+
+def normalize_topo_distance_mode(mode: str) -> str:
+    m = str(mode).strip().lower()
+    if m == "mahalanobis":
+        return DISTANCE_MODE_MAHALANOBIS
+    if m == "ellphi":
+        return DISTANCE_MODE_ELLPHI
+    raise ValueError(f"Unknown topo distance mode: {mode!r}")
+
+
+def rescale_distance_matrix(
+    d_mat: torch.Tensor,
+    *,
+    scale_mode: str,
+    eps_scale: float,
+    clean_scale: float | None = None,
+) -> torch.Tensor:
+    """Align a predicted distance matrix to the teacher PD filtration units.
+
+    ``clean_scale`` (m_e) is the median pairwise Euclidean distance of the teacher
+    cloud for this sample. In ``median`` mode the prediction is scaled so its median
+    matches m_e, i.e. it is brought onto the (untouched) teacher's Euclidean scale;
+    without m_e it falls back to a per-sample unit median. Any other ``scale_mode``
+    applies the fixed scalar ``eps_scale`` (1.0 == no-op).
+    """
+    if scale_mode == "median":
+        off = d_mat[d_mat > 0]
+        if off.numel() == 0:
+            return d_mat
+        denom = torch.median(off).detach() + NUMERICAL_EPS
+        if clean_scale is not None:
+            return d_mat * (float(clean_scale) / denom)
+        return d_mat / denom
+    if eps_scale != 1.0:
+        return d_mat * eps_scale
+    return d_mat
+
+
+def subsample_indices(
+    n: int,
+    max_points: int | None,
+    device: torch.device | str | None = None,
+) -> torch.Tensor | None:
+    """Random subsampling indices (legacy ``topo_loss_max_points``); ``None`` if no-op."""
+    if max_points is None or n <= max_points:
+        return None
+    return torch.randperm(n, device=device)[:max_points]
 
 
 def compute_ellphi_distance_matrix_np(points_np: np.ndarray, params_np: np.ndarray) -> np.ndarray:
@@ -124,3 +176,37 @@ def compute_distance_matrix_batch(
             )
             mats.append(torch.from_numpy(dm).to(device=points.device, dtype=points.dtype))
     return torch.stack(mats, dim=0)
+
+
+def compute_topo_distance_matrix(
+    points: torch.Tensor,
+    params: torch.Tensor,
+    *,
+    distance_mode: str = "mahalanobis",
+    ellphi_backend: str = "auto",
+) -> torch.Tensor:
+    """
+    Shared topology-loss entrypoint: map batched points/ellipse params to ``(B,N,N)`` distances.
+
+    ``distance_mode`` is ``mahalanobis`` or ``ellphi``.
+    When ``ellphi_backend='auto'``, a differentiable ellphi path is preferred and
+    falls back to NumPy when unavailable.
+    """
+    backend = normalize_topo_distance_mode(distance_mode)
+    eb = str(ellphi_backend).strip().lower()
+    ellphi_diff = eb in ("auto", "torch", "grad", "differentiable", "1", "true", "yes")
+    return compute_distance_matrix_batch(
+        points,
+        params,
+        probs=None,
+        symmetrize="max",
+        backend=backend,
+        ellphi_differentiable=ellphi_diff,
+    )
+
+
+def mahalanobis_distance_matrix_batched(points: torch.Tensor, params: torch.Tensor) -> torch.Tensor:
+    """Mahalanobis-style batched distance matrix without probability weighting."""
+    return compute_anisotropic_distance_matrix(
+        points, params, probs=None, symmetrize="max"
+    )
