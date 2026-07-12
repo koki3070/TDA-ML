@@ -131,6 +131,13 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--out-dir", type=Path, default=REPO_ROOT / "outputs/supervised/0710_pwr30_multiseed")
     p.add_argument("--seeds", type=int, nargs="+", default=PAPER_SEEDS)
+    p.add_argument(
+        "--methods",
+        nargs="+",
+        choices=["wdist", "mcc"],
+        default=["wdist", "mcc"],
+        help="Which tune objectives to aggregate (single-mode drivers pass one).",
+    )
     return p.parse_args()
 
 
@@ -145,12 +152,14 @@ def main() -> int:
         "pwr_s*/logs/paper_metrics_test_power_mcc_valtopo_paper_eval.json",
     )
 
+    method_specs = {
+        "wdist": ("proposed_wdist_tune_30ep", wdist_by_seed, args.wdist_tune_json),
+        "mcc": ("proposed_mcc_tune_30ep", mcc_by_seed, args.mcc_tune_json),
+    }
     rows: list[dict[str, Any]] = []
     all_warnings: list[str] = []
-    for method, by_seed, tune_json in (
-        ("proposed_wdist_tune_30ep", wdist_by_seed, args.wdist_tune_json),
-        ("proposed_mcc_tune_30ep", mcc_by_seed, args.mcc_tune_json),
-    ):
+    for key in args.methods:
+        method, by_seed, tune_json = method_specs[key]
         row, warnings = aggregate_row(
             method=method,
             by_seed=by_seed,

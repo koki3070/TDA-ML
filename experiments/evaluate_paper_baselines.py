@@ -15,6 +15,7 @@ Methods:
 Usage::
 
     uv run python experiments/evaluate_paper_baselines.py \\
+        --base-config elongate_n100_no_cls_full120_teacher_local_pca \\
         --out-dir outputs/paper_baselines
 """
 
@@ -445,7 +446,10 @@ METHOD_ORDER = [
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--base-config", type=str, default="reproduce")
+    # No implicit default: the n100 paper comparison must pass the elongate config
+    # (e.g. elongate_n100_no_cls_full120_teacher_local_pca); baselines share its
+    # data settings and evaluation.dbscan / evaluation.baselines grids.
+    p.add_argument("--base-config", type=str, required=True)
     p.add_argument("--out-dir", type=Path, default=REPO_ROOT / "outputs" / "paper_baselines")
     p.add_argument("--seeds", type=int, nargs="+", default=PAPER_SEEDS)
     p.add_argument(

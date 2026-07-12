@@ -140,6 +140,8 @@ no_cls・local_pca 教師・`size_mode=power` スタックについて、**W-Dis
 
 要点: **学習 topo loss と教師 PD は ellphi**；**MCC のチューニング objective と paper eval の DBSCAN は mahalanobis**（filtration 時刻をクラスタリング距離に使わない）。
 
+**重み固定プロトコル（重要）:** ハイパーパラメータ探索（Optuna）は **seed 42 の 20ep proxy で 1 回だけ**行い、得られた best 重み（`w_topo` / `w_aniso` / `w_size` / `lr`）を **5 つのデータ seed（42/123/456/789/1024）すべての 30ep 本番に固定**して適用します。**データ seed ごとの再チューニングは行いません。** 論文の mean ± std はこの固定重みの下でのデータ seed 間ばらつきです。
+
 ## 教師あり学習の目的関数（論文 Methods 用）
 
 本線 `tda_ml/` の学習は **点ラベル BCE** と **clean 点群の $H_1$ 持久図との Wasserstein 教師** を併用します（`configs/reproduce.yaml` 系）。

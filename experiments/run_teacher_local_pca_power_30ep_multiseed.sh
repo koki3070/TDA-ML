@@ -106,10 +106,17 @@ case "${MODE}" in
 esac
 
 echo "Aggregating..."
-uv run python -u experiments/aggregate_power_30ep_multiseed.py \
-  --wdist-out "${WDIST_OUT}" \
-  --mcc-out "${MCC_OUT}" \
-  --out-dir "${LOG_ROOT}" \
-  || true
+AGG_ARGS=(
+  --wdist-out "${WDIST_OUT}"
+  --mcc-out "${MCC_OUT}"
+  --out-dir "${LOG_ROOT}"
+  --seeds "${SEEDS[@]}"
+)
+case "${MODE}" in
+  wdist) AGG_ARGS+=(--methods wdist) ;;
+  mcc) AGG_ARGS+=(--methods mcc) ;;
+esac
+# Strict: missing seeds or aggregation failure must fail this driver (no || true).
+uv run python -u experiments/aggregate_power_30ep_multiseed.py "${AGG_ARGS[@]}"
 
 echo "Done. Logs: ${LOG_ROOT}/"

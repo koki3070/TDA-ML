@@ -186,7 +186,9 @@ def make_objective(args: argparse.Namespace):
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--base-config", type=str, default="elongate_n100_no_cls_tune_local_pca")
+    # No implicit default: every study must state its config surface explicitly
+    # (power stack uses elongate_n100_no_cls_tune_local_pca_ellphi_power_mcc).
+    p.add_argument("--base-config", type=str, required=True)
     p.add_argument("--n-trials", type=int, default=50)
     p.add_argument(
         "--n-startup-trials",

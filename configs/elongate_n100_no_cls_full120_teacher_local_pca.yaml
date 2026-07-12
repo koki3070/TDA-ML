@@ -28,6 +28,9 @@ loss:
   size_power: 1.5
   teacher_mode: local_pca
   teacher_local_pca_k: 10
+  # Must match the tune base (elongate_n100_no_cls_tune_local_pca_ellphi_power_mcc);
+  # tuned weights assume this teacher geometry.
+  teacher_local_pca_normalize_axes: true
 
 training:
   lr: 0.000158

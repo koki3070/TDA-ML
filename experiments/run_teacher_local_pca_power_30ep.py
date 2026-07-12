@@ -14,7 +14,10 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from tda_ml.config import deep_update, load_config  # noqa: E402
 from tda_ml.main import main as train_main  # noqa: E402
-from tda_ml.preflight import preflight_tune_production_run  # noqa: E402
+from tda_ml.preflight import (  # noqa: E402
+    classify_tune_objective,
+    preflight_tune_production_run,
+)
 
 BASE_CONFIG = "elongate_n100_no_cls_full120_teacher_local_pca"
 DEFAULT_OUT = REPO_ROOT / "outputs/supervised/0709_pwr30"
@@ -67,17 +70,17 @@ def load_tune_weights(path: Path) -> dict[str, float]:
 
 
 def infer_tag(tune_json: Path | None, explicit: str | None) -> str:
+    """Map tune objective to paper-eval tag; hard-fail on unknown objective."""
     if explicit:
         return explicit
     if tune_json is None:
         return TAG
     payload = json.loads(tune_json.read_text(encoding="utf-8"))
-    objective = str(payload.get("objective", ""))
-    if "wdist" in objective:
-        return TAG_WDIST
-    if "mcc" in objective:
-        return TAG_MCC
-    return TAG_MCC
+    kind = classify_tune_objective(
+        str(payload.get("objective", "")),
+        objective_kind=payload.get("objective_kind"),
+    )
+    return TAG_WDIST if kind == "wdist" else TAG_MCC
 
 
 def main() -> int:
