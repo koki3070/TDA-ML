@@ -14,10 +14,13 @@
 
   ```bash
   ./scripts/ensure_pytorch_topological.sh
+  ./scripts/ensure_ellphi_repo.sh
   uv sync --all-groups   # ローカル検証用に dev（pytest, ruff）を含める
   ```
 
-  `torch_topological` は **`pytorch-topological/` の path 依存**（`pyproject.toml`）であり、通常の `git clone` だけではディレクトリが揃いません。コミットは **`third_party/pytorch_topological.ref`** に固定し、**`scripts/ensure_pytorch_topological.sh`** がその ref に checkout します（CI と同じ）。サブモジュール gitlink がある場合は `git submodule update --init --recursive` のあとも ensure で pin を検証してください。詳細は `third_party/README.md`。
+  `torch_topological` は **`pytorch-topological/` の path 依存**（`pyproject.toml`）であり、通常の `git clone` だけではディレクトリが揃いません。コミットは **`third_party/pytorch_topological.ref`** に固定し、**`scripts/ensure_pytorch_topological.sh`** がその ref に checkout します（CI と同じ）。
+
+  `ellphi` も **`ellphi_repo/` の path 依存**です。fork の pin は **`third_party/ellphi.ref`**、取得は **`scripts/ensure_ellphi_repo.sh`**（CI と同じ）。`ellphi_repo/` 自体は git に含めません。
 
 - **PyTorch / CUDA**: 数値結果はデバイスや dtype によって変わり得ます。`tda_ml/main.py` の学習ループを使う場合、有効な設定は各実行の `logs/` 配下の `runtime_profile.json` などに記録されます。
 

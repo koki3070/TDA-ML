@@ -27,6 +27,10 @@ jobs:
       - name: Ensure pytorch-topological (uv path dependency)
         run: ./scripts/ensure_pytorch_topological.sh
 
+      # pyproject path dependency; pin matches third_party/ellphi.ref.
+      - name: Ensure ellphi_repo (uv path dependency)
+        run: ./scripts/ensure_ellphi_repo.sh
+
       - name: Install uv and Python 3.12
         uses: astral-sh/setup-uv@v5
         with:
@@ -34,7 +38,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies (all groups, incl. dev / ruff)
-        run: uv sync --all-groups --frozen
+        run: uv sync --all-groups --extra experiments --frozen
 
       - name: Ruff check (repo root; F-1 canonical command)
         run: uv run ruff check .
