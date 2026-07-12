@@ -19,6 +19,13 @@ from tda_ml.reproducibility import (
 
 TuneObjectiveKind = Literal["mcc", "wdist"]
 
+_KNOWN_TUNE_OBJECTIVES: dict[str, TuneObjectiveKind] = {
+    "val_topo_wdist_min": "wdist",
+    "val_topo_wdist_min_at_val_topo_best_ckpt": "wdist",
+    "val_dbscan_mcc_max": "mcc",
+    "val_dbscan_mcc": "mcc",
+}
+
 
 def _require_import(name: str, import_fn) -> None:
     try:
@@ -27,14 +34,34 @@ def _require_import(name: str, import_fn) -> None:
         raise RuntimeError(f"Required dependency {name!r} is not importable: {exc}") from exc
 
 
-def classify_tune_objective(objective: str) -> TuneObjectiveKind:
-    obj = str(objective).lower()
-    if "mcc" in obj:
-        return "mcc"
-    if "wdist" in obj:
+def classify_tune_objective(
+    objective: str,
+    *,
+    objective_kind: str | None = None,
+) -> TuneObjectiveKind:
+    """Resolve tune objective kind from explicit field, whitelist, or substring fallback."""
+    if objective_kind is not None:
+        kind = str(objective_kind).lower().strip()
+        if kind in ("mcc", "wdist"):
+            return kind  # type: ignore[return-value]
+        raise ValueError(
+            f"Unrecognized tune objective_kind {objective_kind!r}; expected 'mcc' or 'wdist'."
+        )
+
+    obj = str(objective).strip()
+    if obj in _KNOWN_TUNE_OBJECTIVES:
+        return _KNOWN_TUNE_OBJECTIVES[obj]
+    lower = obj.lower()
+    if lower in _KNOWN_TUNE_OBJECTIVES:
+        return _KNOWN_TUNE_OBJECTIVES[lower]
+
+    if "wdist" in lower:
         return "wdist"
+    if "mcc" in lower:
+        return "mcc"
     raise ValueError(
-        f"Unrecognized tune objective {objective!r}; expected 'mcc' or 'wdist' in objective string."
+        f"Unrecognized tune objective {objective!r}; set objective_kind in tune JSON "
+        "or use a name containing 'mcc' or 'wdist'."
     )
 
 
@@ -105,7 +132,10 @@ def preflight_tune_json(
     for key in ("w_topo", "w_aniso", "w_size", "lr"):
         if key not in params:
             raise ValueError(f"Tune JSON best_params missing {key!r}: {tune_json}")
-    kind = classify_tune_objective(str(payload["objective"]))
+    kind = classify_tune_objective(
+        str(payload["objective"]),
+        objective_kind=payload.get("objective_kind"),
+    )
     if expected is not None and kind != expected:
         raise ValueError(
             f"Tune JSON objective {payload['objective']!r} is {kind!r}, expected {expected!r}: "
@@ -188,21 +218,6 @@ def preflight_tune_production_run(
     out.mkdir(parents=True, exist_ok=True)
     write_json(out / "RUN_PREFLIGHT.json", preview)
     return preview
-
-
-def preflight_mcc_production_run(
-    *,
-    base_config: str,
-    tune_json: Path,
-    project_root: Path | str,
-    out_base: Path | str,
-) -> dict[str, Any]:
-    return preflight_tune_production_run(
-        base_config=base_config,
-        tune_json=tune_json,
-        project_root=project_root,
-        out_base=out_base,
-    )
 
 
 def write_not_run_manifest(

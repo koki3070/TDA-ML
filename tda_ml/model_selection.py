@@ -39,7 +39,7 @@ class SelectionSettings:
 
 def selection_settings_from_config(config) -> SelectionSettings:
     sel_cfg = (config.get("training", {}).get("selection") or {})
-    metric = sel_cfg.get("metric", "threshold_mcc")
+    metric = sel_cfg.get("metric", "val_topo")
     eval_every = max(1, int(sel_cfg.get("eval_every", 1)))
     dbscan_cfg = (sel_cfg.get("dbscan") or {})
     backend = (

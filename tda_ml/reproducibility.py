@@ -6,8 +6,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-
 from tda_ml.ellphi_torch import _has_ellphi_grad_api
 from tda_ml.numerical_eps import (
     EIGENVALUE_FLOOR,
@@ -17,20 +15,15 @@ from tda_ml.numerical_eps import (
 )
 
 DEFAULT_DBSCAN_EPS_LINSPACE = (0.15, 1.5, 15)
-DEFAULT_DBSCAN_MIN_SAMPLES = [3, 5, 7, 10, 15]
 
 # Skill-aligned run status (see computational-reproducibility failure semantics).
 RUN_STATUS_NOT_RUN = "not-run"
+RUN_STATUS_RUNNING = "running"
 RUN_STATUS_SKIPPED = "skipped"
 RUN_STATUS_FAILED = "failed"
 RUN_STATUS_COMPLETED = "completed"
 RUN_STATUS_EMPTY_RESULT = "empty-result"
 RUN_STATUS_ZERO_RESULT = "zero-result"
-
-
-def default_dbscan_eps_values() -> list[float]:
-    lo, hi, n = DEFAULT_DBSCAN_EPS_LINSPACE
-    return [float(x) for x in np.linspace(lo, hi, int(n))]
 
 
 def _evaluation_dbscan_cfg(config: dict[str, Any]) -> dict[str, Any]:

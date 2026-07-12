@@ -68,6 +68,20 @@ class TestReproducibilityConfig(unittest.TestCase):
             "wdist",
         )
         self.assertEqual(classify_tune_objective("val_dbscan_mcc_max"), "mcc")
+        self.assertEqual(
+            classify_tune_objective("legacy_name", objective_kind="mcc"),
+            "mcc",
+        )
+        self.assertEqual(
+            classify_tune_objective("val_topo_wdist_min"),
+            "wdist",
+        )
+
+    def test_selection_default_is_val_topo(self):
+        from tda_ml.model_selection import selection_settings_from_config
+
+        settings = selection_settings_from_config({})
+        self.assertEqual(settings.metric, "val_topo")
 
 
 class TestPreflightTuneJson(unittest.TestCase):
@@ -79,6 +93,19 @@ class TestPreflightTuneJson(unittest.TestCase):
             path.write_text(
                 '{"objective":"val_topo_wdist_min","best_params":{"w_topo":0.1,'
                 '"w_aniso":0.1,"w_size":0.1,"lr":1e-4}}\n',
+                encoding="utf-8",
+            )
+            payload = preflight_tune_json(path)
+            self.assertEqual(payload["_objective_kind"], "wdist")
+
+    def test_explicit_objective_kind_overrides_name(self):
+        from tda_ml.preflight import preflight_tune_json
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "best.json"
+            path.write_text(
+                '{"objective":"custom_objective","objective_kind":"wdist",'
+                '"best_params":{"w_topo":0.1,"w_aniso":0.1,"w_size":0.1,"lr":1e-4}}\n',
                 encoding="utf-8",
             )
             payload = preflight_tune_json(path)

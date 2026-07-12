@@ -27,6 +27,7 @@ from tda_ml.reproducibility import (
     RUN_STATUS_COMPLETED,
     RUN_STATUS_FAILED,
     RUN_STATUS_NOT_RUN,
+    RUN_STATUS_RUNNING,
     build_dbscan_eval_manifest_fields,
     build_reproducibility_manifest_fields,
 )
@@ -88,11 +89,11 @@ def main(config_name=None, config=None, trial=None, config_overrides=None):
             .get("topology_loss", {})
             .get("distance_backend", "mahalanobis"),
             "checkpoint_selection": (config.get("training", {}).get("selection") or {}).get(
-                "metric", "threshold_mcc"
+                "metric", "val_topo"
             ),
             "early_abort": config.get("training", {}).get("early_abort"),
             "run_dir": run_dir,
-            "run_status": RUN_STATUS_NOT_RUN,
+            "run_status": "pending",
             "final_status": "pending",
             "preflight_status": "pending",
             "fallback_status": "none",
@@ -119,6 +120,7 @@ def main(config_name=None, config=None, trial=None, config_overrides=None):
                 json.dump(manifest, f, ensure_ascii=True, indent=2)
             raise
         manifest["preflight_status"] = "passed"
+        manifest["run_status"] = RUN_STATUS_RUNNING
         with open(manifest_path, "w", encoding="utf-8") as f:
             json.dump(manifest, f, ensure_ascii=True, indent=2)
     else:
@@ -184,7 +186,7 @@ def main(config_name=None, config=None, trial=None, config_overrides=None):
         if impl is not None:
             manifest["distance_backend_impl"] = impl
         manifest["final_status"] = "running"
-        manifest["run_status"] = RUN_STATUS_NOT_RUN
+        manifest["run_status"] = RUN_STATUS_RUNNING
         if config.get("_manifest", {}).get("fallbacks"):
             manifest["fallbacks"] = config["_manifest"]["fallbacks"]
             manifest["fallback_status"] = config["_manifest"].get(

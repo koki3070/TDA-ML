@@ -11,6 +11,7 @@ from tda_ml.distance_backend import (
     subsample_indices,
 )
 from tda_ml.numerical_eps import NUMERICAL_EPS
+from tda_ml.reproducibility import record_fallback
 
 logger = logging.getLogger(__name__)
 
@@ -166,6 +167,7 @@ class TopologicalLoss(nn.Module):
         scale_mode: str = "fixed",
         max_points: int | None = None,
         strict_topo_samples: bool = True,
+        manifest_ref: dict | None = None,
     ):
         super().__init__()
         self.weight = weight
@@ -197,6 +199,7 @@ class TopologicalLoss(nn.Module):
         if self.max_points is not None and self.max_points < 2:
             raise ValueError(f"max_points must be >= 2, got {self.max_points}")
         self.strict_topo_samples = bool(strict_topo_samples)
+        self.manifest_ref = manifest_ref
         self.vr_complex = VietorisRipsComplex(dim=1)
         self.wasserstein = WassersteinDistance(q=2)
 
@@ -271,6 +274,13 @@ class TopologicalLoss(nn.Module):
         if topo_failures:
             batch_skipped = batch_size - valid_samples
             first_i, first_msg = topo_failures[0]
+            if self.manifest_ref is not None:
+                record_fallback(
+                    self.manifest_ref,
+                    "topo_sample_skip",
+                    f"skipped {batch_skipped}/{batch_size} items "
+                    f"(first batch_index={first_i}: {first_msg})",
+                )
             logger.warning(
                 "TopologicalLoss: skipped %d/%d batch items (first batch_index=%s: %s)",
                 batch_skipped,

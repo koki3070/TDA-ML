@@ -235,6 +235,7 @@ class Trainer:
             scale_mode=self.topo_scale_mode,
             max_points=self.topo_loss_max_points,
             strict_topo_samples=self._repro["strict_topo_samples"],
+            manifest_ref=self._manifest_ref,
         )
         self.size_loss_fn = SizeRegularizationLoss(
             w_major=self.lambda_major,
