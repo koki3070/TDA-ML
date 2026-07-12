@@ -34,5 +34,17 @@ class TestAnisotropicOutlierClassifier(unittest.TestCase):
         axes = params[0, :, 0:2]
         self.assertTrue((axes > 0).all())
 
+    def test_axes_use_exp_delta_times_base(self):
+        """a_i = exp(Delta a_i) * a_base (no sigmoid clip on axis scale)."""
+        torch.manual_seed(7)
+        model = AnisotropicOutlierClassifier()
+        x = torch.rand(1, 20, 2)
+        with torch.no_grad():
+            _, topo_feats, _, base_axes = model.encoder(x)
+            raw = model.topology_head(topo_feats)
+            expected_axes = torch.exp(raw[:, :, 0:2]) * base_axes
+            _, params = model(x)
+        torch.testing.assert_close(params[:, :, 0:2], expected_axes)
+
 if __name__ == '__main__':
     unittest.main()

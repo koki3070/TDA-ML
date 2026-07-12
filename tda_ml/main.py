@@ -221,8 +221,20 @@ def main(config_name=None, config=None, trial=None, config_overrides=None):
     best_sel_value = float("inf") if sel_settings.minimize else -1.0
 
     for epoch in range(1, epochs + 1):
-        # res returns (avg_loss, class_loss, topo_loss, aniso_loss, size_loss, ...)
-        res = trainer.train_epoch(data_loader, epoch)
+        try:
+            # res returns (avg_loss, class_loss, topo_loss, aniso_loss, size_loss, ...)
+            res = trainer.train_epoch(data_loader, epoch)
+        except Exception as exc:
+            if manifest_path is not None:
+                manifest["final_status"] = RUN_STATUS_FAILED
+                manifest["run_status"] = RUN_STATUS_FAILED
+                manifest["failure_type"] = type(exc).__name__
+                manifest["failure_error"] = str(exc)
+                if metrics_history:
+                    manifest["last_completed_epoch"] = metrics_history[-1]["epoch"]
+                with open(manifest_path, "w", encoding="utf-8") as f:
+                    json.dump(manifest, f, ensure_ascii=True, indent=2)
+            raise
         val_res = trainer.validate(val_loader)
 
         val_mcc = val_res[4] # MCC is at index 4

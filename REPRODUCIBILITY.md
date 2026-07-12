@@ -154,13 +154,15 @@ no_cls・local_pca 教師・`size_mode=power` スタックについて、**W-Dis
 + w_{\mathrm{aniso}}\mathcal{L}_{\mathrm{aniso}}.
 \]
 
-**楕円パラメータ（`axis_param=legacy`、主表の既定）** — 局所 PCA の $a_{i,\mathrm{base}}, b_{i,\mathrm{base}}, \theta_{i,\mathrm{base}}$ に対し:
+**楕円パラメータ（主表の既定）** — 局所 PCA の $a_{i,\mathrm{base}}, b_{i,\mathrm{base}}, \theta_{i,\mathrm{base}}$ に対し、学習可能な補正 $\Delta a_i,\Delta b_i,\Delta\theta_i$（`topology_head` 出力）で:
 
 \[
 a_i = a_{i,\mathrm{base}}\, e^{\Delta a_i},\quad
 b_i = b_{i,\mathrm{base}}\, e^{\Delta b_i},\quad
 \theta_i = \theta_{i,\mathrm{base}} + \tanh(\Delta\theta_i)\frac{\pi}{2}.
 \]
+
+clip や sigmoid による軸倍率の暗黙クリップは行わない。ellphi 等で退化が起きた run は `run_status: failed` として記録する（[Computational Reproducibility skill](https://github.com/t-uda/skills/blob/main/skills/computational-reproducibility/SKILL.md)）。
 
 **正則化（`tda_ml/losses.py`）**
 

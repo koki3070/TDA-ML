@@ -9,18 +9,27 @@
 # MODE: wdist | mcc | both (default both)
 # SEEDS: default 42 123 456 789 1024
 #
-# Detached:
+# Detached (SSH/logout safe; machine reboot still stops the job):
+#   N_WORKERS=4 THREADS_PER_WORKER=4 \
 #   bash experiments/launch_detached_screen.sh pwr30_ms \
 #     outputs/supervised/0710_pwr30_multiseed/driver.log \
 #     experiments/run_teacher_local_pca_power_30ep_multiseed.sh both
+#
+# Parallelism: N_WORKERS seeds per objective wave; THREADS_PER_WORKER per process
+# (bench: raising OMP past 4 does not speed ellphi topo; parallel seeds do).
 
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 export PATH="${HOME}/.local/bin:${PATH}"
-export OMP_NUM_THREADS="${OMP_NUM_THREADS:-4}"
-export MKL_NUM_THREADS="${MKL_NUM_THREADS:-4}"
-export OPENBLAS_NUM_THREADS="${OPENBLAS_NUM_THREADS:-4}"
+# Per-process threads (bench 2026-07-12: OMP 4/12/16 → identical ~1.5 s/batch; ellphi topo
+# is sample-serial Python + C++). Do not raise unless re-benchmarked.
+THREADS_PER_WORKER="${THREADS_PER_WORKER:-4}"
+export OMP_NUM_THREADS="${OMP_NUM_THREADS:-${THREADS_PER_WORKER}}"
+export MKL_NUM_THREADS="${MKL_NUM_THREADS:-${THREADS_PER_WORKER}}"
+export OPENBLAS_NUM_THREADS="${OPENBLAS_NUM_THREADS:-${THREADS_PER_WORKER}}"
+# Parallel seeds within each objective (wdist / mcc). Each worker uses THREADS_PER_WORKER.
+N_WORKERS="${N_WORKERS:-4}"
 
 MODE="${1:-both}"
 shift || true
@@ -66,7 +75,10 @@ _run_seed() {
     return 0
   fi
 
-  echo "=== ${label} seed=${seed} ==="
+  echo "=== ${label} seed=${seed} (threads=${THREADS_PER_WORKER}) ==="
+  OMP_NUM_THREADS="${THREADS_PER_WORKER}" \
+  MKL_NUM_THREADS="${THREADS_PER_WORKER}" \
+  OPENBLAS_NUM_THREADS="${THREADS_PER_WORKER}" \
   uv run python -u experiments/run_teacher_local_pca_power_30ep.py \
     --epochs "${EPOCHS}" \
     --seed "${seed}" \
@@ -74,7 +86,36 @@ _run_seed() {
     --tune-json "${tune_json}" \
     --tag "${tag}" \
     --dbscan-backend "${DBSCAN_BACKEND}" \
-    2>&1 | tee -a "${log_file}"
+    >> "${log_file}" 2>&1
+}
+
+_run_seed_batch() {
+  local label="$1"
+  local tune_json="$2"
+  local out_base="$3"
+  local tag="$4"
+  shift 4
+  local seeds=("$@")
+  local pids=()
+  local seed pid
+
+  for seed in "${seeds[@]}"; do
+    if _metrics_done "${out_base}" "${seed}" "${tag}"; then
+      echo "[skip] ${label} seed=${seed} (paper_metrics_test already exists)"
+      continue
+    fi
+    _run_seed "${label}" "${tune_json}" "${out_base}" "${tag}" "${seed}" &
+    pids+=($!)
+    echo "  launched ${label} seed=${seed} PID=$!"
+    sleep 1
+  done
+
+  for pid in "${pids[@]}"; do
+    if ! wait "${pid}"; then
+      echo "error: worker PID ${pid} failed" >&2
+      exit 1
+    fi
+  done
 }
 
 _run_method() {
@@ -83,9 +124,34 @@ _run_method() {
   local out_base="$3"
   local tag="$4"
   mkdir -p "${out_base}"
+
+  local pending=()
+  local seed
   for seed in "${SEEDS[@]}"; do
-    _run_seed "${label}" "${tune_json}" "${out_base}" "${tag}" "${seed}"
+    if _metrics_done "${out_base}" "${seed}" "${tag}"; then
+      echo "[skip] ${label} seed=${seed} (paper_metrics_test already exists)"
+    else
+      pending+=("${seed}")
+    fi
   done
+
+  if ((${#pending[@]} == 0)); then
+    echo "[done] ${label}: all seeds complete"
+    return 0
+  fi
+
+  echo "${label}: ${#pending[@]} seed(s) pending, N_WORKERS=${N_WORKERS}, threads=${THREADS_PER_WORKER}"
+  local batch=()
+  for seed in "${pending[@]}"; do
+    batch+=("${seed}")
+    if ((${#batch[@]} >= N_WORKERS)); then
+      _run_seed_batch "${label}" "${tune_json}" "${out_base}" "${tag}" "${batch[@]}"
+      batch=()
+    fi
+  done
+  if ((${#batch[@]} > 0)); then
+    _run_seed_batch "${label}" "${tune_json}" "${out_base}" "${tag}" "${batch[@]}"
+  fi
 }
 
 case "${MODE}" in
