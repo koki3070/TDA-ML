@@ -23,7 +23,7 @@ import argparse
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 import numpy as np
 import torch
@@ -31,9 +31,11 @@ import torch
 from tda_ml.checkpoint_io import extract_model_state_dict, load_torch_checkpoint
 from tda_ml.config import deep_update, load_config, model_kwargs_from_config
 from tda_ml.data_loader import NoisyMNISTDataset, create_data_loader
-from tda_ml.dbscan import apply_anisotropic_dbscan
+from tda_ml.dbscan_eval import evaluate_model_grid, iter_cloud_predictions
 from tda_ml.metrics import compute_recall_specificity_gmean_mcc_wdist
 from tda_ml.models import AnisotropicOutlierClassifier
+from tda_ml.preflight import preflight_paper_eval_run_dir
+from tda_ml.reproducibility import reproducibility_settings
 from tda_ml.seed_utils import set_global_seed
 from tda_ml.supervised_diagnostics import git_revision
 from tda_ml.topo_wdist import TopoWdistOptions, topo_wdist_options_from_config
@@ -86,6 +88,8 @@ def evaluate_cloud_dbscan(
     metric: str = "max",
     topo_options: TopoWdistOptions | None = None,
 ) -> CloudMetrics:
+    from tda_ml.dbscan import apply_anisotropic_dbscan
+
     db_labels = apply_anisotropic_dbscan(
         points,
         params,
@@ -183,88 +187,6 @@ def load_model_from_run(
     return model
 
 
-def iter_cloud_predictions(
-    model: AnisotropicOutlierClassifier,
-    loader,
-    device: torch.device,
-) -> Iterator[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]:
-    with torch.no_grad():
-        for data, labels, clean_pc in loader:
-            data = data.to(device, non_blocking=True)
-            _, params = model(data)
-            data_np = data.cpu().numpy()
-            params_np = params.cpu().numpy()
-            labels_np = labels.cpu().numpy()
-            clean_np = clean_pc.cpu().numpy()
-            batch_size = data_np.shape[0]
-            for b in range(batch_size):
-                yield (
-                    data_np[b],
-                    params_np[b],
-                    labels_np[b],
-                    clean_np[b],
-                )
-
-
-def grid_search_dbscan(
-    clouds: list[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]],
-    *,
-    eps_values: list[float],
-    min_samples_values: list[int],
-    backend: str = "ellphi",
-    topo_options: TopoWdistOptions | None = None,
-) -> tuple[float, int, float]:
-    best_mcc = -1.0
-    best_eps = eps_values[0]
-    best_min_samples = min_samples_values[0]
-    grid_log: list[dict[str, Any]] = []
-
-    for eps in eps_values:
-        for min_samples in min_samples_values:
-            per_cloud: list[CloudMetrics] = []
-            for points, params, labels_gt, clean_pc in clouds:
-                try:
-                    m = evaluate_cloud_dbscan(
-                        points,
-                        params,
-                        labels_gt,
-                        clean_pc,
-                        eps=eps,
-                        min_samples=min_samples,
-                        backend=backend,
-                        topo_options=topo_options,
-                    )
-                    per_cloud.append(m)
-                except Exception as exc:  # noqa: BLE001 — log and skip bad hparams
-                    grid_log.append(
-                        {
-                            "eps": eps,
-                            "min_samples": min_samples,
-                            "error": str(exc),
-                        }
-                    )
-                    per_cloud = []
-                    break
-            if not per_cloud:
-                continue
-            _, _, _, mcc, _ = _aggregate_cloud_metrics(per_cloud)
-            grid_log.append(
-                {
-                    "eps": eps,
-                    "min_samples": min_samples,
-                    "mean_mcc": mcc,
-                    "n_clouds": len(per_cloud),
-                }
-            )
-            if mcc > best_mcc:
-                best_mcc = mcc
-                best_eps = eps
-                best_min_samples = min_samples
-
-    if best_mcc < 0:
-        raise RuntimeError(f"DBSCAN grid search failed for all hparams; log={grid_log[:5]}")
-    return best_eps, best_min_samples, best_mcc
-
 
 def evaluate_split(
     run_dir: Path,
@@ -278,26 +200,48 @@ def evaluate_split(
     min_samples_values: list[int] | None = None,
     backend: str = "ellphi",
     checkpoint_name: str = "best_model.pth",
+    tag: str | None = None,
 ) -> SplitMetrics:
     loader = build_split_loader(config, split, device)
     model = load_model_from_run(run_dir, config, device, checkpoint_name=checkpoint_name)
-    clouds = list(iter_cloud_predictions(model, loader, device))
     topo_options = topo_wdist_options_from_config(config)
+    rep = reproducibility_settings(config)
+    log_dir = run_dir / "logs"
+    tag_suffix = f"_{tag}" if tag else ""
 
     if split == "val":
-        eps_values = eps_values or list(np.linspace(0.15, 1.5, 15))
-        min_samples_values = min_samples_values or [3, 5, 7, 10, 15]
-        eps, min_samples, _ = grid_search_dbscan(
-            clouds,
+        grid = evaluate_model_grid(
+            model,
+            loader,
+            device,
+            config=config,
+            backend=backend,
             eps_values=eps_values,
             min_samples_values=min_samples_values,
-            backend=backend,
+            objective="mcc",
             topo_options=topo_options,
+            allow_skip_degenerate_grid_cells=rep["allow_skip_degenerate_grid_cells"],
+            grid_log_path=log_dir / f"dbscan_grid_log_val{tag_suffix}.json",
         )
-    else:
-        if eps is None or min_samples is None:
-            raise ValueError("test split requires eps and min_samples (from val tuning)")
+        eps = grid.eps
+        min_samples = grid.min_samples
+        return SplitMetrics(
+            split=split,
+            n_clouds=grid.n_clouds,
+            recall=grid.recall,
+            specificity=grid.specificity,
+            gmean=grid.gmean,
+            mcc=grid.mcc,
+            wdist=grid.wdist,
+            dbscan_eps=float(eps),
+            dbscan_min_samples=int(min_samples),
+            backend=backend,
+        )
 
+    if eps is None or min_samples is None:
+        raise ValueError("test split requires eps and min_samples (from val tuning)")
+
+    clouds = list(iter_cloud_predictions(model, loader, device))
     per_cloud: list[CloudMetrics] = []
     for points, params, labels_gt, clean_pc in clouds:
         per_cloud.append(
@@ -357,14 +301,14 @@ def parse_args() -> argparse.Namespace:
         type=float,
         nargs="+",
         default=None,
-        help="Override DBSCAN eps grid for val grid search (default linspace(0.15,1.5,15)).",
+        help="Override DBSCAN eps grid (default: evaluation.dbscan.eps_values from config).",
     )
     p.add_argument(
         "--min-samples-values",
         type=int,
         nargs="+",
         default=None,
-        help="Override DBSCAN min_samples grid for val grid search (default 3 5 7 10 15).",
+        help="Override DBSCAN min_samples grid (default: evaluation.dbscan from config).",
     )
     p.add_argument(
         "--tag",
@@ -388,8 +332,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     run_dir = args.run_dir.resolve()
-    if not run_dir.is_dir():
-        raise SystemExit(f"run-dir not found: {run_dir}")
+    preflight_paper_eval_run_dir(run_dir, checkpoint_name=args.checkpoint_name)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     config = load_run_config(run_dir, args.base_config, args.seed)
@@ -401,6 +344,8 @@ def main() -> int:
     if args.split == "test":
         if args.dbscan_hparams is None:
             args.dbscan_hparams = run_dir / "logs" / hparams_name
+        if not args.dbscan_hparams.is_file():
+            raise FileNotFoundError(f"DBSCAN hparams JSON not found: {args.dbscan_hparams}")
         hparams = json.loads(args.dbscan_hparams.read_text())
         eps = float(hparams["eps"])
         min_samples = int(hparams["min_samples"])
@@ -416,6 +361,7 @@ def main() -> int:
         min_samples_values=args.min_samples_values,
         backend=args.backend,
         checkpoint_name=args.checkpoint_name,
+        tag=args.tag,
     )
 
     log_dir = run_dir / "logs"
