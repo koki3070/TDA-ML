@@ -119,7 +119,12 @@ For **topological loss**, the batched distance matrix is built per `model.topolo
 
 This project is licensed under the MIT License. See `LICENSE`.
 
-External implementations (for example `ellphi_repo` and `pytorch-topological`) are reference-only and are not redistributed here.
+External implementations are reference-only and are not redistributed in this repository.
+
+- **ellphi (training / differentiable tangency):** requires the pinned fork checked out via `./scripts/ensure_ellphi_repo.sh` (`third_party/ellphi.ref` → `ellphi_repo/`). PyPI `ellphi==0.1.2` alone does **not** include the `ellphi.grad` API used for training. Fork: [koki3070/ellphi](https://github.com/koki3070/ellphi) (based on [t-uda/ellphi](https://github.com/t-uda/ellphi)).
+- **pytorch-topological:** [aidos-lab/pytorch-topological](https://github.com/aidos-lab/pytorch-topological) via `./scripts/ensure_pytorch_topological.sh`.
+
+Upstream references:
 
 - `https://github.com/t-uda/ellphi`
 - `https://github.com/aidos-lab/pytorch-topological`

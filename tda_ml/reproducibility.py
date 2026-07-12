@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +17,10 @@ from tda_ml.numerical_eps import (
 )
 
 DEFAULT_DBSCAN_EPS_LINSPACE = (0.15, 1.5, 15)
+
+ELLPHI_REPO_URL = "https://github.com/koki3070/ellphi.git"
+ELLPHI_REF_REL = Path("third_party/ellphi.ref")
+_SHA40_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 
 # Skill-aligned run status (see computational-reproducibility failure semantics).
 RUN_STATUS_NOT_RUN = "not-run"
@@ -118,6 +124,87 @@ def record_fallback(manifest: dict[str, Any], name: str, detail: str) -> None:
     manifest["fallback_status"] = "recorded"
 
 
+def default_project_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def read_pinned_ellphi_revision(project_root: Path | str | None = None) -> str | None:
+    """Return pinned SHA from ``third_party/ellphi.ref`` (first non-comment line)."""
+    root = Path(project_root) if project_root is not None else default_project_root()
+    ref_file = root / ELLPHI_REF_REL
+    if not ref_file.is_file():
+        return None
+    for line in ref_file.read_text(encoding="utf-8").splitlines():
+        token = line.strip()
+        if token and not token.startswith("#"):
+            return token
+    return None
+
+
+def read_ellphi_repo_head(project_root: Path | str | None = None) -> str | None:
+    """Return ``ellphi_repo`` HEAD if the directory is a git checkout."""
+    root = Path(project_root) if project_root is not None else default_project_root()
+    repo = root / "ellphi_repo"
+    git_dir = repo / ".git"
+    if not git_dir.exists():
+        return None
+    try:
+        return (
+            subprocess.check_output(
+                ["git", "-C", str(repo), "rev-parse", "HEAD"],
+                stderr=subprocess.DEVNULL,
+                text=True,
+            )
+            .strip()
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+
+
+def assert_ellphi_repo_matches_pin(*, project_root: Path | str | None = None) -> None:
+    """Hard-fail when ``ellphi_repo`` checkout differs from ``third_party/ellphi.ref``."""
+    root = Path(project_root) if project_root is not None else default_project_root()
+    pinned = read_pinned_ellphi_revision(root)
+    if pinned is None:
+        raise FileNotFoundError(
+            f"Missing ellphi pin file: {root / ELLPHI_REF_REL}. "
+            "Run ./scripts/ensure_ellphi_repo.sh after clone."
+        )
+    if not _SHA40_RE.fullmatch(pinned):
+        raise ValueError(f"Invalid ellphi pin (expected 40-char SHA): {pinned!r}")
+
+    installed = read_ellphi_repo_head(root)
+    if installed is None:
+        raise FileNotFoundError(
+            f"ellphi_repo checkout missing under {root / 'ellphi_repo'}. "
+            "Run ./scripts/ensure_ellphi_repo.sh before training or CI."
+        )
+    if installed != pinned:
+        raise RuntimeError(
+            "ellphi_repo HEAD does not match third_party/ellphi.ref: "
+            f"installed={installed}, pinned={pinned}. "
+            "Run ./scripts/ensure_ellphi_repo.sh to sync the fork."
+        )
+
+
+def build_ellphi_repo_manifest_fields(project_root: Path | str | None = None) -> dict[str, Any]:
+    """Manifest fields for the pinned ellphi fork (path dependency, not vendored)."""
+    root = Path(project_root) if project_root is not None else default_project_root()
+    pinned = read_pinned_ellphi_revision(root)
+    installed = read_ellphi_repo_head(root)
+    fields: dict[str, Any] = {
+        "ellphi_repo_url": ELLPHI_REPO_URL,
+        "ellphi_repo_pin_file": str(ELLPHI_REF_REL).replace("\\", "/"),
+    }
+    if pinned is not None:
+        fields["ellphi_repo_revision_pinned"] = pinned
+    if installed is not None:
+        fields["ellphi_repo_revision_installed"] = installed
+    if pinned is not None and installed is not None:
+        fields["ellphi_repo_revision_mismatch"] = installed != pinned
+    return fields
+
+
 def assert_ellphi_differentiable_available(*, ellphi_differentiable: bool) -> str:
     """Return impl label or raise if differentiable ellphi was requested but unavailable."""
     if not ellphi_differentiable:
@@ -161,7 +248,11 @@ def baseline_grids_from_config(config: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def build_reproducibility_manifest_fields(config: dict[str, Any]) -> dict[str, Any]:
+def build_reproducibility_manifest_fields(
+    config: dict[str, Any],
+    *,
+    project_root: Path | str | None = None,
+) -> dict[str, Any]:
     return {
         "settings": reproducibility_settings(config),
         "numerical_eps_module": "tda_ml.numerical_eps",
@@ -171,6 +262,7 @@ def build_reproducibility_manifest_fields(config: dict[str, Any]) -> dict[str, A
             "EIGENVALUE_FLOOR": EIGENVALUE_FLOOR,
             "INLIER_PROB_MIN": INLIER_PROB_MIN,
         },
+        "ellphi_repo": build_ellphi_repo_manifest_fields(project_root),
     }
 
 

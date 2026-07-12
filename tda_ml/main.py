@@ -98,7 +98,9 @@ def main(config_name=None, config=None, trial=None, config_overrides=None):
             "preflight_status": "pending",
             "fallback_status": "none",
             "fallbacks": [],
-            "reproducibility": build_reproducibility_manifest_fields(config),
+            "reproducibility": build_reproducibility_manifest_fields(
+                config, project_root=default_project_root()
+            ),
         }
         if config.get("evaluation"):
             manifest["dbscan_eval"] = build_dbscan_eval_manifest_fields(config)

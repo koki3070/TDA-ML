@@ -20,7 +20,9 @@
 
   `torch_topological` は **`pytorch-topological/` の path 依存**（`pyproject.toml`）であり、通常の `git clone` だけではディレクトリが揃いません。コミットは **`third_party/pytorch_topological.ref`** に固定し、**`scripts/ensure_pytorch_topological.sh`** がその ref に checkout します（CI と同じ）。
 
-  `ellphi` も **`ellphi_repo/` の path 依存**です。fork の pin は **`third_party/ellphi.ref`**、取得は **`scripts/ensure_ellphi_repo.sh`**（CI と同じ）。`ellphi_repo/` 自体は git に含めません。
+  `ellphi` も **`ellphi_repo/` の path 依存**です。fork の pin は **`third_party/ellphi.ref`**、取得は **`scripts/ensure_ellphi_repo.sh`**（CI と同じ）。`ellphi_repo/` 自体は git に含めません。PyPI の `ellphi==0.1.2` だけでは **`ellphi.grad`（学習用）が不足**するため、clone 後は ensure 必須です。
+
+  各 run の `logs/run_manifest.json` には `reproducibility.ellphi_repo` として **pin 済み SHA** と **インストール済み checkout SHA** が記録されます。不一致時は preflight が hard-fail します。
 
 - **PyTorch / CUDA**: 数値結果はデバイスや dtype によって変わり得ます。`tda_ml/main.py` の学習ループを使う場合、有効な設定は各実行の `logs/` 配下の `runtime_profile.json` などに記録されます。
 

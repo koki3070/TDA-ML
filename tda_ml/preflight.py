@@ -11,8 +11,10 @@ from tda_ml.reproducibility import (
     RUN_STATUS_NOT_RUN,
     assert_ellphi_differentiable_available,
     assert_loss_config_explicit,
+    assert_ellphi_repo_matches_pin,
     baseline_grids_from_config,
     build_dbscan_eval_manifest_fields,
+    build_ellphi_repo_manifest_fields,
     dbscan_grid_from_config,
     write_json,
 )
@@ -85,6 +87,7 @@ def preflight_training_config(
     ellphi_diff = bool(topo.get("ellphi_differentiable", True))
     if backend == "ellphi":
         _require_import("ellphi", lambda: __import__("ellphi"))
+        assert_ellphi_repo_matches_pin(project_root=root)
         impl = assert_ellphi_differentiable_available(ellphi_differentiable=ellphi_diff)
     else:
         impl = backend
@@ -111,6 +114,7 @@ def preflight_training_config(
         "distance_backend": backend,
         "distance_backend_impl": impl,
         "seed": config.get("data", {}).get("seed"),
+        "ellphi_repo": build_ellphi_repo_manifest_fields(root),
     }
     if config.get("evaluation"):
         preview["dbscan_eval"] = build_dbscan_eval_manifest_fields(config)

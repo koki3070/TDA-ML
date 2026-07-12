@@ -30,8 +30,8 @@ uv run python experiments/run_backend_multiseed.py \
   --epochs 30 \
   --out-base "$OUT_BASE"
 
-RUN_DIR=$(ls -d "${OUT_BASE}"/backend_ellphi_seed42_* | tail -1)
-BASELINE_DIR=$(ls -d "${BASELINE_PARENT}"/backend_ellphi_seed42_* | tail -1)
+RUN_DIR=$(scripts/latest_run_dir.sh "$OUT_BASE" eph_s42 backend_ellphi_seed42)
+BASELINE_DIR=$(scripts/latest_run_dir.sh "$BASELINE_PARENT" eph_s42 backend_ellphi_seed42)
 
 echo "=== evaluate $(date -Iseconds) ==="
 uv run python experiments/evaluate_topo_checkpoint.py \

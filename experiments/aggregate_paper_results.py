@@ -137,8 +137,9 @@ def discover_run_dirs(out_base: Path) -> list[Path]:
                     found.append(run_dir.resolve())
 
     if not found:
-        for metrics_path in sorted(out_base.glob("backend_ellphi_seed*/logs/paper_metrics_test.json")):
-            found.append(metrics_path.parent.parent.resolve())
+        for pattern in ("eph_s*/logs/paper_metrics_test.json", "backend_ellphi_seed*/logs/paper_metrics_test.json"):
+            for metrics_path in sorted(out_base.glob(pattern)):
+                found.append(metrics_path.parent.parent.resolve())
         for metrics_path in sorted(out_base.glob("reproduce_*/logs/paper_metrics_test.json")):
             found.append(metrics_path.parent.parent.resolve())
 
