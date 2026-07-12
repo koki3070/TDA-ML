@@ -6,7 +6,7 @@ Search space (log-uniform): ``w_aniso``, ``w_size``, ``w_topo``, ``lr``.
 
 Each trial:
 1. Trains ``--tune-epochs`` with ``save_every=1`` (``best_model.pth`` = val_topo min).
-2. Loads ``best_model.pth`` (fallback: train_topo best saved checkpoint).
+2. Loads ``best_model.pth`` (val_topo selection checkpoint; hard-fail if missing).
 3. Objective = mean val **topo W-Dist** (learned ellipses vs local_pca teacher PD).
 
 Base config ``elongate_n100_no_cls_tune_local_pca`` sets ``teacher_mode: local_pca``,
@@ -30,12 +30,12 @@ import torch
 from optuna.study import MaxTrialsCallback
 from optuna.trial import TrialState
 
-from tda_ml.checkpoint_io import load_torch_checkpoint
+from tda_ml.checkpoint_io import resolve_val_topo_checkpoint
 from tda_ml.config import deep_update, load_config
 from tda_ml.main import main as train_main
+from tda_ml.preflight import preflight_wdist_tune_study
 from tda_ml.topo_wdist import TopoWdistOptions, compute_topo_wdist, topo_wdist_options_from_config
 
-from checkpoint_selection import best_topo_checkpoint  # noqa: E402
 from evaluate_paper_protocol import (  # noqa: E402
     build_split_loader,
     iter_cloud_predictions,
@@ -46,46 +46,58 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CHECKPOINT_POLICY = "val_topo_best"
 SAVE_EVERY = 1
 
+# Narrow bands (shared with tune_elongate_mcc power protocol).
+NARROW_W_TOPO_RANGE = (0.05, 0.25)
+NARROW_W_SIZE_RANGE = (0.1, 0.6)
+NARROW_W_ANISO_RANGE = (0.03, 0.15)
+NARROW_LR_RANGE = (1e-4, 5e-4)
+
+# Legacy wide search.
+WIDE_W_ANISO_RANGE = (0.05, 5.0)
+WIDE_W_SIZE_RANGE = (0.005, 0.5)
+WIDE_W_TOPO_RANGE = (0.02, 0.5)
+WIDE_LR_RANGE = (1e-4, 2e-3)
+
 
 def mean_val_topo_wdist(
     clouds: list[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]],
     *,
     topo_options: TopoWdistOptions,
 ) -> float:
-    """Mean per-cloud topo W-Dist on val (independent of DBSCAN)."""
+    """Mean per-cloud topo W-Dist on val (independent of DBSCAN) without ad-hoc fallbacks."""
     vals: list[float] = []
     for points, params, _labels_gt, clean_pc in clouds:
-        vals.append(compute_topo_wdist(points, params, clean_pc, topo_options))
-    if not vals:
-        return float("inf")
+        val = compute_topo_wdist(points, params, clean_pc, topo_options)
+        vals.append(val)
     return float(np.mean(vals))
 
 
-def resolve_tune_checkpoint(run_dir: Path) -> tuple[str, int, float]:
-    """Prefer ``best_model.pth`` (val_topo); else train_topo best saved ckpt."""
-    best_path = run_dir / "best_model.pth"
-    if best_path.is_file():
-        ckpt = load_torch_checkpoint(str(best_path), map_location="cpu")
-        epoch = int(ckpt.get("epoch", -1))
-        sel = ckpt.get("selection_value", ckpt.get("val_topo_loss"))
-        val_topo = float(sel) if sel is not None else float("nan")
-        return "best_model.pth", epoch, val_topo
-    ckpt_name, epoch, train_topo, _g_ep, _g_topo = best_topo_checkpoint(run_dir)
-    return ckpt_name, epoch, train_topo
-
-
 def build_trial_config(
-    base_config: str, *, w_aniso: float, w_size: float, w_topo: float, lr: float,
-    backend: str, tune_epochs: int, out_base: str, trial_number: int,
+    base_config: str,
+    *,
+    w_aniso: float,
+    w_size: float,
+    w_topo: float,
+    lr: float,
+    backend: str,
+    tune_epochs: int,
+    out_base: str,
+    trial_number: int,
+    size_mode: str = "quadratic",
+    size_ref: float = 1.34,
+    size_power: float = 1.5,
 ) -> dict[str, Any]:
     cfg = load_config(base_config, project_root=REPO_ROOT)
     overrides = {
-        "meta": {"config_id": f"tune_elongate_t{trial_number:03d}"},
+        "meta": {"config_id": f"tune_elongate_t{trial_number:03d}", "run_slug": f"t{trial_number:03d}"},
         "loss": {
             "w_aniso": float(w_aniso),
             "w_size": float(w_size),
             "w_topo": float(w_topo),
             "aniso_mode": "elongate",
+            "size_mode": size_mode,
+            "size_ref": float(size_ref),
+            "size_power": float(size_power),
         },
         "training": {
             "epochs": int(tune_epochs),
@@ -104,24 +116,52 @@ def build_trial_config(
     return deep_update(cfg, overrides)
 
 
+def search_ranges(*, narrow: bool) -> tuple[tuple[float, float], ...]:
+    if narrow:
+        return (
+            NARROW_W_ANISO_RANGE,
+            NARROW_W_SIZE_RANGE,
+            NARROW_W_TOPO_RANGE,
+            NARROW_LR_RANGE,
+        )
+    return (
+        WIDE_W_ANISO_RANGE,
+        WIDE_W_SIZE_RANGE,
+        WIDE_W_TOPO_RANGE,
+        WIDE_LR_RANGE,
+    )
+
+
 def make_objective(args: argparse.Namespace):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    w_aniso_range, w_size_range, w_topo_range, lr_range = search_ranges(
+        narrow=bool(args.narrow_search)
+    )
 
     def objective(trial: optuna.Trial) -> float:
-        w_aniso = trial.suggest_float("w_aniso", 0.05, 5.0, log=True)
-        w_size = trial.suggest_float("w_size", 0.005, 0.5, log=True)
-        w_topo = trial.suggest_float("w_topo", 0.02, 0.5, log=True)
-        lr = trial.suggest_float("lr", 1e-4, 2e-3, log=True)
+        w_aniso = trial.suggest_float("w_aniso", *w_aniso_range, log=True)
+        w_size = trial.suggest_float("w_size", *w_size_range, log=True)
+        w_topo = trial.suggest_float("w_topo", *w_topo_range, log=True)
+        lr = trial.suggest_float("lr", *lr_range, log=True)
 
         cfg = build_trial_config(
-            args.base_config, w_aniso=w_aniso, w_size=w_size, w_topo=w_topo, lr=lr,
-            backend=args.backend, tune_epochs=args.tune_epochs, out_base=args.out_base,
+            args.base_config,
+            w_aniso=w_aniso,
+            w_size=w_size,
+            w_topo=w_topo,
+            lr=lr,
+            backend=args.backend,
+            tune_epochs=args.tune_epochs,
+            out_base=args.out_base,
             trial_number=trial.number,
+            size_mode=args.size_mode,
+            size_ref=args.size_ref,
+            size_power=args.size_power,
         )
         result = train_main(config=cfg)
         run_dir = Path(result["run_dir"])
 
-        ckpt_name, ckpt_epoch, val_topo_sel = resolve_tune_checkpoint(run_dir)
+        ckpt_name, ckpt_epoch, val_topo_sel = resolve_val_topo_checkpoint(run_dir)
         topo_options = topo_wdist_options_from_config(cfg)
         model = load_model_from_run(run_dir, cfg, device, checkpoint_name=ckpt_name)
         loader = build_split_loader(cfg, "val", device)
@@ -133,12 +173,11 @@ def make_objective(args: argparse.Namespace):
         trial.set_user_attr("checkpoint_epoch", ckpt_epoch)
         trial.set_user_attr("val_topo_loss_at_ckpt", val_topo_sel)
         trial.set_user_attr("teacher_mode", topo_options.teacher_mode)
+        trial.set_user_attr("size_mode", args.size_mode)
         trial.set_user_attr("run_dir", str(run_dir))
         print(
-            f"[trial {trial.number}] w_aniso={w_aniso:.4f} w_size={w_size:.4f} "
-            f"w_topo={w_topo:.4f} lr={lr:.2e} "
-            f"ckpt={ckpt_name} ep={ckpt_epoch} val_topo_sel={val_topo_sel:.5f} "
-            f"-> val topo W-Dist={mwd:.5f}"
+            f"[trial {trial.number}] wdist={mwd:.5f} "
+            f"w_topo={w_topo:.3f} w_size={w_size:.3f} ep={ckpt_epoch}"
         )
         return mwd
 
@@ -156,8 +195,26 @@ def parse_args() -> argparse.Namespace:
         help="Random startup trials before TPE modeling kicks in.",
     )
     p.add_argument("--tune-epochs", type=int, default=20)
-    p.add_argument("--backend", type=str, default="mahalanobis", choices=["mahalanobis", "ellphi"])
-    p.add_argument("--out-base", type=str, default="outputs/tune_elongate")
+    p.add_argument(
+        "--backend",
+        type=str,
+        default="ellphi",
+        choices=["mahalanobis", "ellphi"],
+        help="Training topo-loss backend (ellphi = ellipse tangency filtration).",
+    )
+    p.add_argument("--out-base", type=str, default="outputs/tune/0629_elongate")
+    p.add_argument(
+        "--size-mode",
+        default="quadratic",
+        choices=["quadratic", "power", "softplus", "barrier"],
+    )
+    p.add_argument("--size-ref", type=float, default=1.34)
+    p.add_argument("--size-power", type=float, default=1.5)
+    p.add_argument(
+        "--narrow-search",
+        action="store_true",
+        help="Use narrow search bands (same as tune_elongate_mcc power protocol).",
+    )
     p.add_argument("--seed", type=int, default=42, help="Optuna sampler seed")
     p.add_argument(
         "--storage",
@@ -182,6 +239,11 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     Path(args.out_base).mkdir(parents=True, exist_ok=True)
+    preflight_wdist_tune_study(
+        base_config=args.base_config,
+        project_root=REPO_ROOT,
+        out_base=args.out_base,
+    )
 
     study = optuna.create_study(
         study_name=args.study_name,
@@ -201,28 +263,34 @@ def main() -> int:
             make_objective(args),
             n_trials=args.n_trials,
             callbacks=callbacks,
-            catch=(Exception,),
         )
         n_done = len([t for t in study.trials if t.state == TrialState.COMPLETE])
         print(f"[worker done] completed trials in study so far: {n_done}")
         return 0
 
     best = study.best_trial
+    w_aniso_range, w_size_range, w_topo_range, lr_range = search_ranges(
+        narrow=bool(args.narrow_search)
+    )
     payload = {
         "objective": "val_topo_wdist_min_at_val_topo_best_ckpt",
         "checkpoint_policy": CHECKPOINT_POLICY,
         "save_every": SAVE_EVERY,
         "base_config": args.base_config,
         "backend": args.backend,
+        "size_mode": args.size_mode,
+        "size_ref_default": args.size_ref,
+        "size_power_default": args.size_power,
+        "narrow_search": bool(args.narrow_search),
         "teacher_mode": "local_pca",
         "tune_epochs": args.tune_epochs,
         "n_trials": args.n_trials,
         "n_startup_trials": args.n_startup_trials,
         "search_space": {
-            "w_aniso": [0.05, 5.0],
-            "w_size": [0.005, 0.5],
-            "w_topo": [0.02, 0.5],
-            "lr": [1e-4, 2e-3],
+            "w_aniso": list(w_aniso_range),
+            "w_size": list(w_size_range),
+            "w_topo": list(w_topo_range),
+            "lr": list(lr_range),
         },
         "best_value_wdist": best.value,
         "best_params": best.params,

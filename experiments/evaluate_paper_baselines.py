@@ -46,16 +46,19 @@ from experiments.evaluate_paper_protocol import (
 from tda_ml.config import deep_update, load_config
 from tda_ml.metrics import compute_recall_specificity_gmean_mcc_wdist
 from tda_ml.numerical_eps import EIGENVALUE_FLOOR, PCA_RIDGE_EPS
+from tda_ml.preflight import preflight_baseline_eval
+from tda_ml.reproducibility import (
+    RUN_STATUS_COMPLETED,
+    baseline_grids_from_config,
+    record_fallback,
+    reproducibility_settings,
+    write_json,
+)
 from tda_ml.supervised_diagnostics import git_revision
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PAPER_SEEDS = [42, 123, 456, 789, 1024]
 LOCAL_PCA_K = 10
-
-DEFAULT_EPS_VALUES = list(np.linspace(0.15, 1.5, 15))
-DEFAULT_MIN_SAMPLES_VALUES = [3, 5, 7, 10, 15]
-DEFAULT_CONTAMINATION_VALUES = [0.05, 0.07, 0.09, 0.11, 0.13, 0.15, 0.20]
-DEFAULT_LOF_N_NEIGHBORS = [5, 10, 15, 20, 30]
 
 
 @dataclass
@@ -221,6 +224,8 @@ def grid_search_clouds(
     param_combos: Sequence[dict[str, Any]],
     *,
     desc: str,
+    allow_skip_degenerate_grid_cells: bool = False,
+    manifest_ref: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], float, list[dict[str, Any]]]:
     best_mcc = -1.0
     best_params = dict(param_combos[0])
@@ -232,15 +237,30 @@ def grid_search_clouds(
         for cloud in clouds:
             try:
                 per_cloud.append(evaluate_fn(cloud, **params))
-            except Exception as exc:  # noqa: BLE001 — skip invalid hparam combos
-                error = str(exc)
+            except Exception as exc:
+                error = f"{type(exc).__name__}: {exc}"
                 per_cloud = []
                 break
         if error is not None:
-            grid_log.append({**params, "error": error})
-            continue
+            entry = {**params, "status": "failed", "error": error}
+            grid_log.append(entry)
+            if allow_skip_degenerate_grid_cells:
+                if manifest_ref is not None:
+                    record_fallback(
+                        manifest_ref,
+                        "baseline_grid_cell_skip",
+                        f"{desc} {params}: {error}",
+                    )
+                continue
+            raise RuntimeError(
+                f"Baseline grid cell failed ({desc} {params}): {error}. "
+                "Set reproducibility.allow_skip_degenerate_grid_cells=true to opt in "
+                "to skipping failed cells."
+            )
         _, _, _, mcc, _ = _aggregate_cloud_metrics(per_cloud)
-        grid_log.append({**params, "mean_mcc": mcc, "n_clouds": len(per_cloud)})
+        grid_log.append(
+            {**params, "status": "ok", "mean_mcc": mcc, "n_clouds": len(per_cloud)}
+        )
         if mcc > best_mcc:
             best_mcc = mcc
             best_params = dict(params)
@@ -286,6 +306,8 @@ def evaluate_method_on_seed(
     min_samples_values: Sequence[int],
     contamination_values: Sequence[float],
     lof_n_neighbors_values: Sequence[int],
+    allow_skip_degenerate_grid_cells: bool = False,
+    manifest_ref: dict[str, Any] | None = None,
 ) -> tuple[SeedResult, list[dict[str, Any]]]:
     val_clouds = load_clouds(config, "val", device)
     test_clouds = load_clouds(config, "test", device)
@@ -297,6 +319,8 @@ def evaluate_method_on_seed(
             evaluate_euclidean_dbscan,
             combos,
             desc=f"seed{seed} euclidean_dbscan val",
+            allow_skip_degenerate_grid_cells=allow_skip_degenerate_grid_cells,
+            manifest_ref=manifest_ref,
         )
         test_fn: Callable[..., CloudMetrics] = evaluate_euclidean_dbscan
     elif method == "isolation_forest":
@@ -309,6 +333,8 @@ def evaluate_method_on_seed(
             evaluate_isolation_forest,
             combos,
             desc=f"seed{seed} isolation_forest val",
+            allow_skip_degenerate_grid_cells=allow_skip_degenerate_grid_cells,
+            manifest_ref=manifest_ref,
         )
         test_fn = evaluate_isolation_forest
     elif method == "lof":
@@ -318,6 +344,8 @@ def evaluate_method_on_seed(
             evaluate_lof,
             combos,
             desc=f"seed{seed} lof val",
+            allow_skip_degenerate_grid_cells=allow_skip_degenerate_grid_cells,
+            manifest_ref=manifest_ref,
         )
         test_fn = evaluate_lof
     elif method == "adbscan":
@@ -327,6 +355,8 @@ def evaluate_method_on_seed(
             evaluate_adbscan,
             combos,
             desc=f"seed{seed} adbscan val",
+            allow_skip_degenerate_grid_cells=allow_skip_degenerate_grid_cells,
+            manifest_ref=manifest_ref,
         )
         test_fn = evaluate_adbscan
     else:
@@ -424,10 +454,34 @@ def parse_args() -> argparse.Namespace:
         choices=METHOD_ORDER,
         default=METHOD_ORDER,
     )
-    p.add_argument("--eps-values", type=float, nargs="+", default=DEFAULT_EPS_VALUES)
-    p.add_argument("--min-samples-values", type=int, nargs="+", default=DEFAULT_MIN_SAMPLES_VALUES)
-    p.add_argument("--contamination-values", type=float, nargs="+", default=DEFAULT_CONTAMINATION_VALUES)
-    p.add_argument("--lof-n-neighbors", type=int, nargs="+", default=DEFAULT_LOF_N_NEIGHBORS)
+    p.add_argument(
+        "--eps-values",
+        type=float,
+        nargs="+",
+        default=None,
+        help="Override DBSCAN eps grid (default: evaluation.dbscan.eps_values from config).",
+    )
+    p.add_argument(
+        "--min-samples-values",
+        type=int,
+        nargs="+",
+        default=None,
+        help="Override DBSCAN min_samples grid (default: config).",
+    )
+    p.add_argument(
+        "--contamination-values",
+        type=float,
+        nargs="+",
+        default=None,
+        help="Override IF/LOF contamination grid (default: evaluation.baselines).",
+    )
+    p.add_argument(
+        "--lof-n-neighbors",
+        type=int,
+        nargs="+",
+        default=None,
+        help="Override LOF n_neighbors grid (default: config).",
+    )
     return p.parse_args()
 
 
@@ -435,9 +489,35 @@ def main() -> int:
     args = parse_args()
     out_dir = args.out_dir.resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    cfg = load_config(args.base_config, project_root=REPO_ROOT)
+    preflight_baseline_eval(cfg, project_root=REPO_ROOT, out_dir=out_dir)
+    grids = baseline_grids_from_config(cfg)
+    rep = reproducibility_settings(cfg)
+    manifest_ref: dict[str, Any] = {
+        "fallback_status": "none",
+        "fallbacks": [],
+    }
+
+    eps_values = args.eps_values if args.eps_values is not None else grids["eps_values"]
+    min_samples_values = (
+        args.min_samples_values
+        if args.min_samples_values is not None
+        else grids["min_samples_values"]
+    )
+    contamination_values = (
+        args.contamination_values
+        if args.contamination_values is not None
+        else grids["contamination_values"]
+    )
+    lof_n_neighbors = (
+        args.lof_n_neighbors if args.lof_n_neighbors is not None else grids["lof_n_neighbors"]
+    )
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     manifest = {
+        "run_status": RUN_STATUS_COMPLETED,
         "source_revision": git_revision(REPO_ROOT),
         "base_config": args.base_config,
         "seeds": list(args.seeds),
@@ -446,12 +526,15 @@ def main() -> int:
         "metrics": "compute_recall_specificity_gmean_mcc_wdist",
         "local_pca_k": LOCAL_PCA_K,
         "grids": {
-            "eps_values": list(args.eps_values),
-            "min_samples_values": list(args.min_samples_values),
-            "contamination_values": list(args.contamination_values),
-            "lof_n_neighbors": list(args.lof_n_neighbors),
+            "eps_values": list(eps_values),
+            "min_samples_values": list(min_samples_values),
+            "contamination_values": list(contamination_values),
+            "lof_n_neighbors": list(lof_n_neighbors),
         },
+        "reproducibility": rep,
+        "fallback_status": manifest_ref["fallback_status"],
     }
+    write_json(out_dir / "MANIFEST_baselines.json", manifest)
 
     all_seed_results: dict[str, list[SeedResult]] = {m: [] for m in args.methods}
 
@@ -467,10 +550,12 @@ def main() -> int:
                 config,
                 seed,
                 device,
-                eps_values=args.eps_values,
-                min_samples_values=args.min_samples_values,
-                contamination_values=args.contamination_values,
-                lof_n_neighbors_values=args.lof_n_neighbors,
+                eps_values=eps_values,
+                min_samples_values=min_samples_values,
+                contamination_values=contamination_values,
+                lof_n_neighbors_values=lof_n_neighbors,
+                allow_skip_degenerate_grid_cells=rep["allow_skip_degenerate_grid_cells"],
+                manifest_ref=manifest_ref,
             )
             all_seed_results[method].append(result)
 
@@ -496,11 +581,12 @@ def main() -> int:
 
     manifest["summary_csv"] = str(summary_path)
     manifest["per_seed_json"] = str(out_dir / "seed{seed}/{method}.json")
-    manifest_path = out_dir / "MANIFEST_baselines.json"
-    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+    manifest["fallback_status"] = manifest_ref.get("fallback_status", "none")
+    manifest["fallbacks"] = manifest_ref.get("fallbacks", [])
+    write_json(out_dir / "MANIFEST_baselines.json", manifest)
 
     print(f"\nWrote {summary_path}")
-    print(f"Wrote {manifest_path}")
+    print(f"Wrote {out_dir / 'MANIFEST_baselines.json'}")
     for row in summary_rows:
         print(
             f"  {row['method']}: MCC={row['mcc_mean']:.4f}±{row['mcc_std']:.4f}  "

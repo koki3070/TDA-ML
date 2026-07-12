@@ -4,8 +4,24 @@
 
 ## リポジトリに含まれる範囲（目安）
 
-- **含む:** `tda_ml/`、**`configs/` 直下の正本 YAML**（`base.yaml` と `reproduce` / `dev` / `prod` / `test_fast` の各ファイル）、`tests/`、追跡されている `scripts/`、`experiments/run_backend_multiseed.py`、`experiments/issue59_verify_mahalanobis.py`、および `README.md` / `REPRODUCIBILITY.md` / `pyproject.toml` / `uv.lock` / `LICENSE` / `CITATION.cff` などのメタデータ。
-- **含めない:** `docs/` 以下、`configs/archive/`（履歴用 YAML を置く場合は **ローカルのみ**）、`outputs/`、`data/` など。`load_config("archive/...")` は、手元に `configs/archive/*.yaml` を置いた場合にのみ使えます。
+- **含む:** `tda_ml/`、**`configs/` 直下の正本 YAML**（`base.yaml` と `reproduce` / `dev` / `prod` / `test_fast`、および論文比較用の `elongate_n100_no_cls_*`）、`tests/`、追跡されている `scripts/`、論文・再現用 `experiments/`（下記）、および `README.md` / `REPRODUCIBILITY.md` / `pyproject.toml` / `uv.lock` / `LICENSE` / `CITATION.cff` などのメタデータ。
+- **含めない:** `docs/` 以下（**ローカル実験メモ**；公開方針で git に入れる場合は別途決定）、`configs/archive/`（履歴用 YAML を置く場合は **ローカルのみ**）、`outputs/`、`data/`、`.cursor/` など。`load_config("archive/...")` は、手元に `configs/archive/*.yaml` を置いた場合にのみ使えます。
+
+### 論文比較（ellphi + power 二目的）で使う `experiments/`（2026-07-12）
+
+**現在の主 run:** W-Dist tune 重みの 30ep 5-seed（`run_teacher_local_pca_power_30ep_multiseed.sh wdist`）。
+
+| 区分 | パス |
+|------|------|
+| 本番 5-seed（計算中） | `run_teacher_local_pca_power_30ep_multiseed.sh`, `run_teacher_local_pca_power_30ep.py`, `aggregate_power_30ep_multiseed.py` |
+| paper eval | `evaluate_paper_protocol.py` |
+| ベースライン | `evaluate_paper_baselines.py` |
+| チューニング（重みの出所） | `tune_elongate_wdist.py`, `tune_elongate_mcc.py`, `run_tune_local_pca_power_*` |
+| 補助 | `launch_detached_screen.sh` |
+
+プロトコル・ソース一覧の詳細: ローカル `docs/experiments/20260710_power_dual_objective.md`（§使用ソースコード）、公開前添削: `docs/experiments/20260712_publication_scope.md`。
+
+**実行記録:** 各 run の `source_revision`（git HEAD）は `logs/run_manifest.json` および `paper_metrics_*.json` に記録。未コミットのまま実行した場合、リモート clone では数値が再現できない。
 
 ## 環境
 
@@ -115,6 +131,14 @@ uv run python experiments/run_backend_multiseed.py \
 位相損失用の距離行列は `model.topology_loss.distance_backend` ごとに別定義です。**`mahalanobis`** では、学習で予測した **outlier 確率 `probs`** を距離の重み付けに織り込めます（`tda_ml.topology.compute_anisotropic_distance_matrix`）。**`ellphi`** では楕円の接触距離のみを用い、**確率に基づく重み付けは未実装のため `probs` は使われません**（初回のみ `UserWarning` が出ます。実装は `tda_ml.distance_backend.compute_distance_matrix_batch`）。
 
 したがって、`run_backend_multiseed.py` で同じ YAML を回しても、**位相損失が見ている距離空間はバックエンド間で同一ではありません**。ここでは「同一のデータ・スケジュール・設定表面での再現パイプライン比較」を意図しており、**両バックエンドが数学的に完全に同型の重み付き距離目的関数を共有する**という読み方はしません。`ellphi` 側に Mahalanobis の確率重みに相当する項を無理に足す予定はなく、比較の解釈は本節および `README.md` の英語節（*Backend comparison: outlier-probability weighting*）に従ってください。
+
+### ellphi + power：二目的チューニング（実験メモ）
+
+no_cls・local_pca 教師・`size_mode=power` スタックについて、**W-Dist 最小**と **DBSCAN MCC 最大**の 2 本の Optuna study、および各 best 重みでの 30ep 本番結果は、次にまとめています。
+
+- [`docs/experiments/20260710_power_dual_objective.md`](docs/experiments/20260710_power_dual_objective.md) — 各段階の**目的**、距離 backend の使い分け、数値表、再現コマンド、成果物パス
+
+要点: **学習 topo loss と教師 PD は ellphi**；**MCC のチューニング objective と paper eval の DBSCAN は mahalanobis**（filtration 時刻をクラスタリング距離に使わない）。
 
 ## 教師あり学習の目的関数（論文 Methods 用）
 
