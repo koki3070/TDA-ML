@@ -43,3 +43,37 @@ device: "auto" # "auto", "cpu", "cuda", or "mps"
 outputs:
   log_dir: "outputs/logs"
   image_dir: "outputs/images"
+
+# Paper / tuning DBSCAN grid (explicit; no Python implicit defaults).
+evaluation:
+  dbscan:
+    backend: mahalanobis
+    metric: max
+    eps_values:
+      - 0.15
+      - 0.246429
+      - 0.342857
+      - 0.439286
+      - 0.535714
+      - 0.632143
+      - 0.728571
+      - 0.825
+      - 0.921429
+      - 1.017857
+      - 1.114286
+      - 1.210714
+      - 1.307143
+      - 1.403571
+      - 1.5
+    min_samples_values: [3, 5, 7, 10, 15]
+  baselines:
+    contamination_values: [0.05, 0.07, 0.09, 0.11, 0.13, 0.15, 0.20]
+    lof_n_neighbors: [5, 10, 15, 20, 30]
+
+reproducibility:
+  strict_topo_samples: true
+  allow_nan_batch_skip: false
+  allow_empty_cloud_fallback: false
+  allow_skip_degenerate_grid_cells: false
+  allow_otsu_threshold_fallback: false
+  allow_legacy_loss_keys: false

@@ -28,19 +28,57 @@ class ClassificationLoss(nn.Module):
 
 class SizeRegularizationLoss(nn.Module):
     """
-    Penalizes the size of estimated ellipses to prevent over-expansion.
-    
-    Formula: L = lambda_major * a^2 + lambda_minor * b^2
+    Penalizes ellipse scale.
+
+    Modes:
+    - quadratic (default): ``w_major * a^2 + w_minor * b^2`` on every point (always on).
+    - barrier: ``w * relu(a^2 + b^2 - radius^2)^2`` — zero gradient below ``barrier_radius``.
+    - power: ``w * (||axes||^2 / ref)^gamma`` — always on; gradient grows with scale
+      (small ellipses: weak pull; large ellipses: stronger than quadratic when gamma > 1).
+    - softplus: ``w * softplus(beta * (||axes||^2 / ref - 1))^2`` — smooth ramp centred
+      at ``ref``; no hard dead zone, but gentle below reference scale.
     """
-    def __init__(self, w_major=0.1, w_minor=0.1):
+
+    def __init__(
+        self,
+        w_major: float = 0.1,
+        w_minor: float = 0.1,
+        mode: str = "quadratic",
+        barrier_radius: float = 1.5,
+        size_ref: float = 1.34,
+        size_power: float = 1.5,
+        size_softplus_beta: float = 8.0,
+    ):
         super().__init__()
         self.w_major = w_major
         self.w_minor = w_minor
+        self.mode = mode
+        self.barrier_radius = float(barrier_radius)
+        self.size_ref = float(size_ref)
+        self.size_power = float(size_power)
+        self.size_softplus_beta = float(size_softplus_beta)
+
+    def _weight(self) -> float:
+        return 0.5 * (self.w_major + self.w_minor)
 
     def forward(self, params):
         axes = params[..., 0:2]
         major_axis = axes.max(dim=-1)[0]
         minor_axis = axes.min(dim=-1)[0]
+        sq_norm = major_axis**2 + minor_axis**2
+        ref = max(self.size_ref, NUMERICAL_EPS)
+        weight = self._weight()
+
+        if self.mode == "barrier":
+            excess = F.relu(sq_norm - self.barrier_radius**2)
+            return weight * (excess**2).mean()
+        if self.mode == "power":
+            scaled = sq_norm / ref
+            return weight * scaled.pow(self.size_power).mean()
+        if self.mode == "softplus":
+            # centred at ref: ~0 below ref, ~quadratic in excess above ref
+            x = self.size_softplus_beta * (sq_norm / ref - 1.0)
+            return weight * F.softplus(x).pow(2).mean()
         loss = (self.w_major * (major_axis**2) + self.w_minor * (minor_axis**2)).mean()
         return loss
 
@@ -55,6 +93,8 @@ class AnisotropyPenaltyLoss(nn.Module):
     - elongate: Minimizes minor/major (circularity) -> rewards elongation along the
       local principal direction; circle (ratio=1) is the worst case. This reproduces the
       legacy ``aniso_mode: elongate`` behavior that yielded data-aligned ellipses.
+    - elongate_barrier: ``elongate`` below the aspect-ratio ceiling, plus ``barrier`` on
+      excess above ``barrier_threshold`` (keep tangent elongation, cap needle-like tails).
     """
     def __init__(self, weight=0.01, mode='linear', barrier_threshold=6.0):
         super().__init__()
@@ -74,6 +114,11 @@ class AnisotropyPenaltyLoss(nn.Module):
             aspect_ratios = major_axis / (minor_axis + NUMERICAL_EPS)
             barrier_term = F.relu(aspect_ratios - self.barrier_threshold).pow(2).mean()
             loss = 10.0 * barrier_term
+        elif self.mode == 'elongate_barrier':
+            aspect_ratios = major_axis / (minor_axis + NUMERICAL_EPS)
+            elongate = (minor_axis / (major_axis + NUMERICAL_EPS)).mean()
+            barrier_term = F.relu(aspect_ratios - self.barrier_threshold).pow(2).mean()
+            loss = elongate + 10.0 * barrier_term
         elif self.mode == 'elongate':
             loss = (minor_axis / (major_axis + NUMERICAL_EPS)).mean()
         else:
@@ -120,6 +165,7 @@ class TopologicalLoss(nn.Module):
         eps_scale: float = 1.0,
         scale_mode: str = "fixed",
         max_points: int | None = None,
+        strict_topo_samples: bool = True,
     ):
         super().__init__()
         self.weight = weight
@@ -150,6 +196,7 @@ class TopologicalLoss(nn.Module):
         self.max_points = int(max_points) if max_points is not None else None
         if self.max_points is not None and self.max_points < 2:
             raise ValueError(f"max_points must be >= 2, got {self.max_points}")
+        self.strict_topo_samples = bool(strict_topo_samples)
         self.vr_complex = VietorisRipsComplex(dim=1)
         self.wasserstein = WassersteinDistance(q=2)
 
@@ -204,13 +251,21 @@ class TopologicalLoss(nn.Module):
                 pd_pred_info = self.vr_complex(d_mat, treat_as_distances=True)
                 loss_sample = self.wasserstein(pd_pred_info, clean_pd_info[i]) ** 2
 
-                if not torch.isnan(loss_sample):
-                    total_loss += loss_sample
-                    valid_samples += 1
-                else:
-                    topo_failures.append((i, "nan or inf Wasserstein loss"))
+                if torch.isnan(loss_sample):
+                    msg = f"nan or inf Wasserstein loss at batch_index={i}"
+                    if self.strict_topo_samples:
+                        raise RuntimeError(f"TopologicalLoss: {msg}")
+                    topo_failures.append((i, msg))
+                    continue
+                total_loss += loss_sample
+                valid_samples += 1
+            except RuntimeError:
+                raise
             except Exception as exc:
-                topo_failures.append((i, f"{type(exc).__name__}: {exc}"))
+                msg = f"{type(exc).__name__}: {exc} at batch_index={i}"
+                if self.strict_topo_samples:
+                    raise RuntimeError(f"TopologicalLoss: {msg}") from exc
+                topo_failures.append((i, msg))
                 continue
 
         if topo_failures:

@@ -27,6 +27,7 @@ class TopoWdistOptions:
     teacher_mode: str = "local_pca"
     distance_backend: str = "ellphi"
     teacher_local_pca_k: int = 10
+    teacher_local_pca_normalize_axes: bool = True
     eps_scale: float = 1.0
     scale_mode: str = "fixed"
     max_points: int | None = None
@@ -47,6 +48,12 @@ def topo_wdist_options_from_config(config: dict[str, Any]) -> TopoWdistOptions:
             loss_cfg.get(
                 "teacher_local_pca_k",
                 training_cfg.get("teacher_local_pca_k", 10),
+            )
+        ),
+        teacher_local_pca_normalize_axes=bool(
+            loss_cfg.get(
+                "teacher_local_pca_normalize_axes",
+                training_cfg.get("teacher_local_pca_normalize_axes", True),
             )
         ),
         eps_scale=float(
@@ -105,6 +112,7 @@ def compute_topo_wdist(
             distance_backend=opts.distance_backend,
             ellphi_differentiable=False,
             local_pca_k=opts.teacher_local_pca_k,
+            local_pca_normalize_axes=opts.teacher_local_pca_normalize_axes,
             max_points=opts.max_points,
             need_clean_scales=(opts.scale_mode == "median"),
         )

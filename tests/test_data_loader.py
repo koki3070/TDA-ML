@@ -67,8 +67,8 @@ class TestDataLoader(unittest.TestCase):
 
 
 
-    def test_empty_foreground_does_not_crash(self):
-        """Padding with zero foreground points must not call randint(0, 0)."""
+    def test_empty_foreground_strict_raises(self):
+        """Empty MNIST foreground must hard-fail unless opt-in fallback is enabled."""
         dataset = NoisyMNISTDataset(
             train=False,
             num_samples=1,
@@ -77,6 +77,23 @@ class TestDataLoader(unittest.TestCase):
             preload=False,
             deterministic=True,
             noise_seed=42,
+            allow_empty_cloud_fallback=False,
+        )
+        dataset.images = torch.zeros((1, 28, 28), dtype=torch.uint8)
+        with self.assertRaises(RuntimeError):
+            dataset[0]
+
+    def test_empty_foreground_opt_in_fallback(self):
+        """Opt-in fallback reproduces legacy random-point behavior."""
+        dataset = NoisyMNISTDataset(
+            train=False,
+            num_samples=1,
+            max_points=20,
+            num_outliers=5,
+            preload=False,
+            deterministic=True,
+            noise_seed=42,
+            allow_empty_cloud_fallback=True,
         )
         dataset.images = torch.zeros((1, 28, 28), dtype=torch.uint8)
         data, labels, clean_pc = dataset[0]

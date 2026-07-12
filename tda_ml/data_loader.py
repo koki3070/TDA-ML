@@ -36,13 +36,17 @@ class NoisyMNISTDataset(Dataset):
 
     def __init__(self, root='./data', train=True, num_samples=5000,
                  max_points=150, num_outliers=20, noise_std=0.01,
-                 deterministic=False, indices=None, noise_seed=0, preload=True):
+                 deterministic=False, indices=None, noise_seed=0, preload=True,
+                 allow_empty_cloud_fallback=False,
+                 allow_otsu_threshold_fallback=False):
         self.max_points = max_points
         self.num_outliers = num_outliers
         self.noise_std = noise_std
         self.deterministic = deterministic
         self.noise_seed = noise_seed
         self.preload = preload
+        self.allow_empty_cloud_fallback = bool(allow_empty_cloud_fallback)
+        self.allow_otsu_threshold_fallback = bool(allow_otsu_threshold_fallback)
 
         full_dataset = datasets.MNIST(root, train=train, download=True)
 
@@ -76,7 +80,13 @@ class NoisyMNISTDataset(Dataset):
         try:
             thresh = threshold_otsu(img)
             binary_img = img > thresh
-        except ValueError:
+        except ValueError as exc:
+            if not self.allow_otsu_threshold_fallback:
+                raise RuntimeError(
+                    "Otsu threshold failed for MNIST image; "
+                    "set reproducibility.allow_otsu_threshold_fallback=true to opt in "
+                    "to img>0 binarization."
+                ) from exc
             binary_img = img > 0
 
         # np.argwhere returns (row, col) = (y, x)
@@ -117,6 +127,11 @@ class NoisyMNISTDataset(Dataset):
         num_points = points.shape[0]
 
         if num_points == 0:
+            if not self.allow_empty_cloud_fallback:
+                raise RuntimeError(
+                    f"Empty foreground point cloud at dataset index {idx}; "
+                    "set data.allow_empty_cloud_fallback=true to opt in to random fallback."
+                )
             fallback_n = min(8, self.max_points)
             if self.deterministic:
                 points = torch.rand(fallback_n, 2, generator=rng) * 2.0 - 1.0

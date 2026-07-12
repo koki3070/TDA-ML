@@ -1,9 +1,12 @@
 """Checkpoint-selection policy for the training loop.
 
-Prefer ``val_topo`` so the saved checkpoint matches the topology loss used
-during training (same ellphi/local_pca teacher PD as ``train_epoch``).
-``wdist`` / ``dbscan_mcc`` use DBSCAN + Euclidean inlier-point W-Dist
-(paper reporting metric; not the training objective).
+Default production protocol (``val_topo``):
+- During training: save ``best_model.pth`` at minimum ``val_topo_loss`` (no DBSCAN grid).
+- After training: ``evaluate_paper_protocol.py`` grid-searches DBSCAN on val once, then
+  reports test MCC at the chosen ``(eps, min_samples)``.
+
+Optional ``wdist`` / ``dbscan_mcc`` run a val DBSCAN grid every ``eval_every`` epochs to
+pick checkpoints; use only for tuning or ablations (much slower on CPU).
 
 metric: 'val_topo' | 'wdist' | 'dbscan_mcc' | 'threshold_mcc' | 'val_loss'
 
@@ -15,8 +18,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 
 from tda_ml.dbscan_eval import evaluate_model_grid
+from tda_ml.reproducibility import reproducibility_settings, resolve_dbscan_grid
 from tda_ml.topo_wdist import topo_wdist_options_from_config
 
 logger = logging.getLogger(__name__)
@@ -95,15 +100,25 @@ def compute_epoch_selection(
     run_sel_eval = (epoch % settings.eval_every == 0) or (epoch == epochs)
     if settings.metric in ("wdist", "dbscan_mcc") and run_sel_eval:
         objective = "wdist" if settings.metric == "wdist" else "mcc"
+        rep = reproducibility_settings(config)
+        eps_values, min_samples_values = resolve_dbscan_grid(
+            config,
+            eps_values=settings.eps_values,
+            min_samples_values=settings.min_samples_values,
+        )
         grid = evaluate_model_grid(
             model,
             val_loader,
             device,
+            config=config,
             backend=settings.backend,
-            eps_values=settings.eps_values,
-            min_samples_values=settings.min_samples_values,
+            eps_values=eps_values,
+            min_samples_values=min_samples_values,
             objective=objective,
             topo_options=topo_wdist_options_from_config(config),
+            allow_skip_degenerate_grid_cells=rep["allow_skip_degenerate_grid_cells"],
+            grid_log_path=Path(config["outputs"]["log_dir"]) / f"dbscan_grid_epoch_{epoch}.json",
+            manifest_ref=config.get("_manifest"),
         )
         print(
             f"Epoch {epoch}: selection[{settings.metric}] val_wdist={grid.wdist:.5f} "

@@ -75,6 +75,27 @@ def _looks_like_pytorch_state_dict(obj: Any) -> bool:
     return all(isinstance(v, torch.Tensor) for v in obj.values())
 
 
+def resolve_val_topo_checkpoint(run_dir: Path) -> tuple[str, int, float]:
+    """Return ``(checkpoint_name, epoch, val_topo_loss)`` from ``best_model.pth`` only.
+
+    Hard-fails if the val_topo checkpoint is missing or lacks selection metadata.
+    No fallback to ``checkpoint_epoch_*.pth`` (skill: no silent checkpoint substitute).
+    """
+    best_path = run_dir / "best_model.pth"
+    if not best_path.is_file():
+        raise FileNotFoundError(
+            f"Missing best_model.pth (val_topo selection checkpoint): {best_path}"
+        )
+    ckpt = load_torch_checkpoint(best_path, map_location="cpu")
+    epoch = int(ckpt.get("epoch", -1))
+    sel = ckpt.get("selection_value", ckpt.get("val_topo_loss"))
+    if sel is None:
+        raise RuntimeError(
+            f"Checkpoint missing selection_value/val_topo_loss: {best_path}"
+        )
+    return "best_model.pth", epoch, float(sel)
+
+
 def extract_model_state_dict(checkpoint: Any) -> dict[str, Any]:
     """Return ``model_state_dict`` payload if present; else ``checkpoint`` if it is a state dict."""
     if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:

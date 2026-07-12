@@ -7,6 +7,7 @@ import numpy as np
 import torch
 
 from tda_ml.dbscan import apply_anisotropic_dbscan, compute_anisotropic_distance_matrix_np
+from tda_ml.run_paths import visualization_filename
 
 INLIER_COLOR = "tab:blue"
 OUTLIER_COLOR = "tab:red"
@@ -130,6 +131,6 @@ def visualize(
                 ax.set_ylim(-1.2, 1.2)
 
     plt.tight_layout(rect=[0, 0, 1, 0.96])
-    filename = os.path.join(output_dir, f"{title_prefix}_result_epoch_{epoch}.png")
+    filename = os.path.join(output_dir, visualization_filename(epoch))
     plt.savefig(filename)
     plt.close()
