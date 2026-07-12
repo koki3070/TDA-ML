@@ -149,11 +149,10 @@ def compute_distance_matrix_batch(
 
     use_torch = ellphi_differentiable and _has_ellphi_grad_api()
     if ellphi_differentiable and not use_torch:
-        warnings.warn(
-            "ellphi.grad (coef_from_cov_grad / pdist_tangency_grad) is unavailable; "
-            "falling back to the NumPy non-differentiable path. Please update ellphi.",
-            UserWarning,
-            stacklevel=2,
+        raise RuntimeError(
+            "distance_backend='ellphi' with ellphi_differentiable=True requires "
+            "ellphi.grad (coef_from_cov_grad / pdist_tangency_grad). "
+            "Install/update ellphi or set ellphi_differentiable=false explicitly."
         )
 
     batch_size = points.shape[0]

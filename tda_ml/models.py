@@ -145,7 +145,11 @@ class AnisotropicOutlierClassifier(nn.Module):
         outlier_logits = self.classification_head(cls_feats)
         raw = self.topology_head(topo_feats)
 
-        axes_scale = torch.exp(raw[:, :, 0:2])
+        # Restrict axes scaling factor within a physically sound range to prevent
+        # both underflow collapse (NaN) and overflow cheat (over-expansion).
+        min_scale = 0.2
+        max_scale = 3.0
+        axes_scale = min_scale + (max_scale - min_scale) * torch.sigmoid(raw[:, :, 0:2])
         axes = axes_scale * base_axes
         angle_delta = torch.tanh(raw[:, :, 2:3]) * (torch.pi / 2)
         angle = base_angle + angle_delta

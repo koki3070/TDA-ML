@@ -5,6 +5,12 @@ import torch
 from torch.optim import Adam
 from torch_topological.nn import VietorisRipsComplex
 from tda_ml.teacher_pd import compute_clean_teacher_batch
+from tda_ml.reproducibility import (
+    assert_ellphi_differentiable_available,
+    assert_loss_config_explicit,
+    record_fallback,
+    reproducibility_settings,
+)
 from tda_ml.losses import (
     ClassificationLoss, 
     TopologicalLoss, 
@@ -70,16 +76,34 @@ class Trainer:
         self.scaler = torch.amp.GradScaler("cuda", enabled=self.use_amp)
 
     def _init_losses(self, config):
-        """Parse loss weights (loss.* with legacy training.* fallbacks) and build loss modules."""
+        """Parse loss weights from ``loss.*``; legacy ``training.lambda_*`` only when opted in."""
+        assert_loss_config_explicit(config)
         training_cfg = config.get('training', {})
         loss_cfg = config.get('loss', {})
+        allow_legacy = reproducibility_settings(config)["allow_legacy_loss_keys"]
 
-        self.lambda_class = loss_cfg.get('w_class', training_cfg.get('lambda_class', 1.0))
-        self.lambda_topo = loss_cfg.get('w_topo', training_cfg.get('lambda_topo', 0.1))
-        self.lambda_aniso = loss_cfg.get('w_aniso', training_cfg.get('lambda_aniso', 0.01))
-        self.lambda_min_b = loss_cfg.get(
-            'w_min_b', training_cfg.get('lambda_min_b', 0.0)
-        )
+        def _loss_or_legacy(key: str, legacy_key: str, default: float) -> float:
+            if key in loss_cfg:
+                return loss_cfg[key]
+            if allow_legacy and legacy_key in training_cfg:
+                return training_cfg[legacy_key]
+            raise ValueError(
+                f"loss.{key} must be set explicitly; legacy training.{legacy_key} fallback "
+                "is disabled. Set reproducibility.allow_legacy_loss_keys=true to opt in."
+            )
+
+        self._repro = reproducibility_settings(config)
+        self._manifest_ref = config.setdefault("_manifest", {})
+
+        self.lambda_class = _loss_or_legacy("w_class", "lambda_class", 1.0)
+        self.lambda_topo = _loss_or_legacy("w_topo", "lambda_topo", 0.1)
+        self.lambda_aniso = _loss_or_legacy("w_aniso", "lambda_aniso", 0.01)
+        if "w_min_b" in loss_cfg:
+            self.lambda_min_b = float(loss_cfg["w_min_b"])
+        elif allow_legacy and "lambda_min_b" in training_cfg:
+            self.lambda_min_b = float(training_cfg["lambda_min_b"])
+        else:
+            self.lambda_min_b = 0.0
         self.min_b_target = float(
             loss_cfg.get('min_b_target', training_cfg.get('min_b_target', 0.2))
         )
@@ -89,14 +113,63 @@ class Trainer:
         if self.topo_loss_max_points is not None:
             self.topo_loss_max_points = int(self.topo_loss_max_points)
         
-        size_default = loss_cfg.get(
-            "w_size", training_cfg.get("lambda_size", 0.1)
-        )
+        size_default = _loss_or_legacy("w_size", "lambda_size", 0.1)
         self.lambda_major = training_cfg.get("lambda_major", size_default)
         self.lambda_minor = training_cfg.get("lambda_minor", size_default)
 
         self.aniso_mode = loss_cfg.get("aniso_mode", training_cfg.get("aniso_mode", "linear"))
-        logger.info("Anisotropy penalty mode: %s", self.aniso_mode)
+        self.aniso_barrier_threshold = float(
+            loss_cfg.get(
+                "aniso_barrier_threshold",
+                training_cfg.get("barrier_threshold", 6.0),
+            )
+        )
+        self.size_mode = str(
+            loss_cfg.get("size_mode", training_cfg.get("size_mode", "quadratic"))
+        ).strip().lower()
+        self.size_barrier_radius = float(
+            loss_cfg.get(
+                "size_barrier_radius",
+                training_cfg.get("size_barrier_radius", 1.5),
+            )
+        )
+        self.size_ref = float(
+            loss_cfg.get("size_ref", training_cfg.get("size_ref", 1.34))
+        )
+        self.size_power = float(
+            loss_cfg.get("size_power", training_cfg.get("size_power", 1.5))
+        )
+        self.size_softplus_beta = float(
+            loss_cfg.get(
+                "size_softplus_beta",
+                training_cfg.get("size_softplus_beta", 8.0),
+            )
+        )
+        logger.info(
+            "Anisotropy penalty mode: %s (barrier_threshold=%s)",
+            self.aniso_mode,
+            self.aniso_barrier_threshold,
+        )
+        if self.size_mode == "barrier":
+            logger.info(
+                "Size penalty mode: barrier (radius=%s, w_size=%s)",
+                self.size_barrier_radius,
+                size_default,
+            )
+        elif self.size_mode == "power":
+            logger.info(
+                "Size penalty mode: power (ref=%s, gamma=%s, w_size=%s)",
+                self.size_ref,
+                self.size_power,
+                size_default,
+            )
+        elif self.size_mode == "softplus":
+            logger.info(
+                "Size penalty mode: softplus (ref=%s, beta=%s, w_size=%s)",
+                self.size_ref,
+                self.size_softplus_beta,
+                size_default,
+            )
 
         pos_weight_val = config.get('loss', {}).get('pos_weight', 1.0)
         pos_weight = torch.tensor([pos_weight_val], device=self.device) if pos_weight_val != 1.0 else None
@@ -124,8 +197,14 @@ class Trainer:
                 training_cfg.get("teacher_local_pca_k", 10),
             )
         )
+        self.teacher_local_pca_normalize_axes = bool(
+            loss_cfg.get(
+                "teacher_local_pca_normalize_axes",
+                training_cfg.get("teacher_local_pca_normalize_axes", True),
+            )
+        )
         logger.info(
-            "Topological distance backend: %s%s (prob_weighting=%s, scale_mode=%s, eps_scale=%s, teacher_mode=%s)",
+            "Topological distance backend: %s%s (prob_weighting=%s, scale_mode=%s, eps_scale=%s, teacher_mode=%s%s)",
             self.distance_backend,
             (
                 f" (ellphi_differentiable={self.ellphi_differentiable})"
@@ -136,7 +215,17 @@ class Trainer:
             self.topo_scale_mode,
             self.topo_eps_scale,
             self.teacher_mode,
+            (
+                f", teacher_local_pca_normalize_axes={self.teacher_local_pca_normalize_axes}"
+                if self.teacher_mode == "local_pca"
+                else ""
+            ),
         )
+        if self.distance_backend == "ellphi":
+            impl = assert_ellphi_differentiable_available(
+                ellphi_differentiable=self.ellphi_differentiable
+            )
+            self._manifest_ref["distance_backend_impl"] = impl
         self.topo_loss_fn = TopologicalLoss(
             weight=self.lambda_topo,
             distance_backend=self.distance_backend,
@@ -145,12 +234,22 @@ class Trainer:
             eps_scale=self.topo_eps_scale,
             scale_mode=self.topo_scale_mode,
             max_points=self.topo_loss_max_points,
+            strict_topo_samples=self._repro["strict_topo_samples"],
+            manifest_ref=self._manifest_ref,
         )
-        self.size_loss_fn = SizeRegularizationLoss(w_major=self.lambda_major, w_minor=self.lambda_minor)
+        self.size_loss_fn = SizeRegularizationLoss(
+            w_major=self.lambda_major,
+            w_minor=self.lambda_minor,
+            mode=self.size_mode,
+            barrier_radius=self.size_barrier_radius,
+            size_ref=self.size_ref,
+            size_power=self.size_power,
+            size_softplus_beta=self.size_softplus_beta,
+        )
         self.aniso_loss_fn = AnisotropyPenaltyLoss(
-            weight=self.lambda_aniso, 
-            mode=self.aniso_mode, 
-            barrier_threshold=config['training'].get('barrier_threshold', 6.0)
+            weight=self.lambda_aniso,
+            mode=self.aniso_mode,
+            barrier_threshold=self.aniso_barrier_threshold,
         )
         self.min_b_loss_fn = MinBRegularizationLoss(
             weight=self.lambda_min_b,
@@ -174,6 +273,7 @@ class Trainer:
             distance_backend=self.distance_backend,
             ellphi_differentiable=self.ellphi_differentiable,
             local_pca_k=self.teacher_local_pca_k,
+            local_pca_normalize_axes=self.teacher_local_pca_normalize_axes,
             max_points=self.topo_loss_max_points,
             need_clean_scales=(self.topo_scale_mode == "median"),
         )
@@ -250,8 +350,22 @@ class Trainer:
                     loss = loss + self.lambda_class * class_loss
 
             if torch.isnan(loss):
-                logger.warning("NaN loss at epoch=%s batch_index=%s; skipping step", epoch, i)
-                continue
+                if self._repro["allow_nan_batch_skip"]:
+                    record_fallback(
+                        self._manifest_ref,
+                        "nan_batch_skip",
+                        f"epoch={epoch} batch_index={i}",
+                    )
+                    logger.warning(
+                        "NaN loss at epoch=%s batch_index=%s; skipping step (opt-in fallback)",
+                        epoch,
+                        i,
+                    )
+                    continue
+                raise RuntimeError(
+                    f"NaN loss at epoch={epoch} batch_index={i}; "
+                    "set reproducibility.allow_nan_batch_skip=true to opt in to skipping."
+                )
 
             steps_completed += 1
             if self.use_amp:
@@ -398,7 +512,11 @@ class Trainer:
 
         avg_aniso = self._val_aniso_accum / num_batches
         avg_size = self._val_size_accum / num_batches
-        avg_topo_loss = total_topo_loss / topo_steps if topo_steps > 0 else 0.0
+        if self.lambda_topo > 0 and topo_steps == 0:
+            raise RuntimeError(
+                "validate: w_topo>0 but topological loss was not computed for any batch"
+            )
+        avg_topo_loss = total_topo_loss / topo_steps
 
         recall = recall_score(all_labels, all_preds, zero_division=0)
         

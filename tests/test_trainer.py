@@ -39,6 +39,12 @@ class TestTrainer(unittest.TestCase):
                 'grad_clip_value': 1.0,
                 'visualize_every': 10
             },
+            'loss': {
+                'w_class': 1.0,
+                'w_topo': 0.1,
+                'w_aniso': 0.01,
+                'w_size': 0.1,
+            },
             'model': {
                 'topology_loss': {
                     'distance_backend': 'mahalanobis',
@@ -85,7 +91,12 @@ class TestTrainer(unittest.TestCase):
 
     def test_w_class_zero_skips_classification_gradient(self):
         """w_class=0 and prob_weighting=false must not update the classification head."""
-        self.config["loss"] = {"w_class": 0.0}
+        self.config["loss"] = {
+            "w_class": 0.0,
+            "w_topo": 0.1,
+            "w_aniso": 0.01,
+            "w_size": 0.1,
+        }
         self.config["model"]["topology_loss"]["prob_weighting"] = False
         trainer = Trainer(self.model, self.config, self.device)
         self.assertEqual(trainer.lambda_class, 0.0)

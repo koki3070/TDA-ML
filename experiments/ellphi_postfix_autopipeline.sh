@@ -131,7 +131,10 @@ if progress.exists():
             metrics_path = candidate
 
 if metrics_path is None:
-    candidates = sorted(calib.glob("backend_ellphi_seed42_*/logs/metrics.csv"))
+    candidates = sorted(
+        list(calib.glob("eph_s42_*/logs/metrics.csv"))
+        + list(calib.glob("backend_ellphi_seed42_*/logs/metrics.csv"))
+    )
     if candidates:
         metrics_path = candidates[-1]
 

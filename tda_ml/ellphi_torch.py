@@ -53,29 +53,25 @@ class _EllphiPdistMatrix(torch.autograd.Function):
 
         ctx.save_for_backward(centers, cov)
         device, dtype = centers.device, centers.dtype
-        n = centers.shape[0]
         x_np = centers.detach().cpu().numpy().astype(np.float64)
         c_np = cov.detach().cpu().numpy().astype(np.float64)
 
         coefs, vjp_cov = coef_from_cov_grad(x_np, c_np)
         if np.isnan(coefs).any():
-            ctx.vjp_pdist = None
-            ctx.vjp_cov = None
-            ctx.failed = True
-            return torch.full((n, n), float("nan"), device=device, dtype=dtype)
+            raise RuntimeError(
+                "ellphi coef_from_cov_grad returned NaN; degenerate ellipse geometry"
+            )
 
         try:
             dists, vjp_pdist = pdist_tangency_grad(coefs)
-        except (ZeroDivisionError, ValueError, RuntimeError):
-            ctx.vjp_pdist = None
-            ctx.vjp_cov = None
-            ctx.failed = True
-            return torch.full((n, n), float("nan"), device=device, dtype=dtype)
+        except (ZeroDivisionError, ValueError, RuntimeError) as exc:
+            raise RuntimeError(
+                "ellphi pdist_tangency_grad failed; degenerate ellipse geometry"
+            ) from exc
 
         full = squareform(dists)
         ctx.vjp_pdist = vjp_pdist
         ctx.vjp_cov = vjp_cov
-        ctx.failed = False
         ctx.device = device
         ctx.dtype = dtype
         return torch.as_tensor(full, device=device, dtype=dtype)
@@ -83,16 +79,13 @@ class _EllphiPdistMatrix(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor):
         centers, cov = ctx.saved_tensors
-        if getattr(ctx, "failed", True) or ctx.vjp_pdist is None:
-            return torch.zeros_like(centers), torch.zeros_like(cov)
-
         g = grad_output.detach().cpu().numpy().astype(np.float64)
         g_cond = _condensed_gradient_from_full(g)
         try:
             grad_coefs = ctx.vjp_pdist(g_cond)
             grad_x, grad_cov_np = ctx.vjp_cov(grad_coefs)
-        except (ZeroDivisionError, ValueError, RuntimeError):
-            return torch.zeros_like(centers), torch.zeros_like(cov)
+        except (ZeroDivisionError, ValueError, RuntimeError) as exc:
+            raise RuntimeError("ellphi VJP backward failed") from exc
 
         dev, dt = ctx.device, ctx.dtype
         return (

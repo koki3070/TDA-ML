@@ -92,6 +92,14 @@ def build_dataloaders(config, seed: int, settings: DataLoaderSettings):
         num_outliers=data_cfg["num_outliers"],
         deterministic=True,
         noise_seed=seed,
+                 allow_empty_cloud_fallback=bool(
+            (config.get("reproducibility") or {}).get("allow_empty_cloud_fallback", False)
+            or data_cfg.get("allow_empty_cloud_fallback", False)
+        ),
+        allow_otsu_threshold_fallback=bool(
+            (config.get("reproducibility") or {}).get("allow_otsu_threshold_fallback", False)
+            or data_cfg.get("allow_otsu_threshold_fallback", False)
+        ),
     )
 
     train_dataset = NoisyMNISTDataset(train=True, indices=train_indices, **dataset_kwargs)

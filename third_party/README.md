@@ -7,4 +7,14 @@ Pins the commit checked out under `pytorch-topological/` for the `torch_topologi
 - **Fetch / sync:** `./scripts/ensure_pytorch_topological.sh` (used by CI and `README.md`).
 - **Bump upstream:** choose a new commit on [aidos-lab/pytorch-topological](https://github.com/aidos-lab/pytorch-topological), update the SHA in `pytorch_topological.ref`, run the ensure script, then `uv sync` and `uv run ruff check .`.
 
-`.gitmodules` may list the same repository; the ref file is the canonical pin when the parent repo does not record a submodule gitlink.
+## `ellphi.ref`
+
+Pins the commit checked out under `ellphi_repo/` for the `ellphi` path dependency in `pyproject.toml`. The pinned fork adds the differentiable `pdist_tangency_grad` API used by `tda_ml/ellphi_torch.py`.
+
+- **Fetch / sync:** `./scripts/ensure_ellphi_repo.sh` (used by CI and `README.md`).
+- **Bump fork:** choose a new commit on [koki3070/ellphi](https://github.com/koki3070/ellphi) (based on [t-uda/ellphi](https://github.com/t-uda/ellphi)), update the SHA in `ellphi.ref`, run the ensure script, then `uv sync` and `uv run pytest`.
+- **Long-term:** when differentiable tangency lands upstream, migrate the pin to [t-uda/ellphi](https://github.com/t-uda/ellphi) (or an org mirror) and drop the personal fork URL in `scripts/ensure_ellphi_repo.sh` / `tda_ml/reproducibility.py` together in one commit.
+
+Run directories from `run_backend_multiseed.py` use slug `eph_s42` (not legacy `backend_ellphi_seed42_*`). Shell helpers: `scripts/latest_run_dir.sh OUT_BASE eph_s42 backend_ellphi_seed42`.
+
+`.gitmodules` may list the same repositories; the ref files are the canonical pins when the parent repo does not record submodule gitlinks.

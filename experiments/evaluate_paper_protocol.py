@@ -8,7 +8,7 @@ clean teacher PD (local PCA + ellphi by default). DBSCAN affects MCC only.
 Usage::
 
     uv run python experiments/evaluate_paper_protocol.py \\
-        --run-dir outputs/supervised/20260627/055936_paper_reproduce_1week_tuned/backend_ellphi_seed42_* \\
+        --run-dir outputs/supervised/.../eph_s42_<stamp> \\
         --base-config reproduce \\
         --split val
 

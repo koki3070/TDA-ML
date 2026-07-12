@@ -29,9 +29,8 @@ Aggregation in ``backend_stats.csv`` (over distinct seeds per backend):
 Concurrency / filesystem:
 - A lock file under ``--out-base`` serializes this driver for one output tree.
   Do not run two instances sharing the same ``--out-base``.
-- Run directory detection uses new directories matching ``config_id_*`` before
-  and after each training call; **parallel** runs with the same ``config_id``
-  prefix can collide. Intended use is **one sequential process** per ``out-base``.
+- Run directory is taken from ``train_main`` return value (``run_dir``); no
+  filesystem glob on ``config_id`` prefix.
 
 Privacy / version control:
 - ``progress_summary.csv`` stores absolute ``run_dir`` paths; avoid committing
@@ -42,7 +41,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import glob
 import math
 import os
 from contextlib import contextmanager
@@ -247,19 +245,6 @@ def write_backend_stats(progress_csv: str, stats_csv: str) -> None:
             )
 
 
-def detect_new_run_dir(base_dir: str, prefix: str, before: set[str]) -> str:
-    """Infer new run directory after train_main; sequential runs only (see module doc)."""
-    after = set(glob.glob(os.path.join(base_dir, f"{prefix}_*")))
-    created = sorted(after - before)
-    if created:
-        return created[-1]
-    # Fallback if directory existed before timing race.
-    candidates = sorted(after)
-    if not candidates:
-        raise RuntimeError(f"Could not detect run directory for prefix={prefix}")
-    return candidates[-1]
-
-
 def run_one(
     base_config_name: str,
     backend: str,
@@ -290,10 +275,13 @@ def run_one(
         overrides["loss"] = {"w_topo": float(w_topo)}
     cfg = deep_update(cfg, overrides)
 
-    before = set(glob.glob(os.path.join(out_base, f"{config_id}_*")))
     print(f"[START] backend={backend} seed={seed} epochs={epochs}")
-    train_main(config=cfg)
-    run_dir = detect_new_run_dir(out_base, config_id, before)
+    result = train_main(config=cfg)
+    run_dir = result.get("run_dir")
+    if not run_dir:
+        raise RuntimeError(
+            f"train_main did not return run_dir for backend={backend} seed={seed}"
+        )
     metrics_path = os.path.join(run_dir, "logs", "metrics.csv")
     metrics = parse_metrics_csv(metrics_path)
 

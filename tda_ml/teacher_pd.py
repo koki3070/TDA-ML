@@ -16,7 +16,10 @@ from tda_ml.local_pca import (
 def _median_offdiag(d_mat: torch.Tensor) -> float:
     off = d_mat[d_mat > 0]
     if off.numel() == 0:
-        return 1.0
+        raise RuntimeError(
+            "Teacher distance matrix has no positive off-diagonal entries; "
+            "cannot compute median scale."
+        )
     return float(torch.median(off).item())
 
 
@@ -28,6 +31,7 @@ def compute_clean_teacher_batch(
     distance_backend: str = "mahalanobis",
     ellphi_differentiable: bool = False,
     local_pca_k: int = 10,
+    local_pca_normalize_axes: bool = True,
     max_points: int | None = None,
     need_clean_scales: bool = False,
 ) -> tuple[list, list[float] | None]:
@@ -54,10 +58,10 @@ def compute_clean_teacher_batch(
             valid_mask = torch.abs(pts).sum(dim=1) > 1e-6
             pts = pts[valid_mask]
             if pts.shape[0] < 2:
-                clean_pd_info.append(vr_complex(pts))
-                if clean_scales is not None:
-                    clean_scales.append(1.0)
-                continue
+                raise RuntimeError(
+                    f"Clean teacher cloud has {pts.shape[0]} valid inlier points after "
+                    "zero-padding mask; need at least 2 for persistence."
+                )
 
             if max_points is not None and pts.shape[0] > max_points:
                 idx = torch.randperm(pts.shape[0], device=pts.device)[:max_points]
@@ -68,11 +72,19 @@ def compute_clean_teacher_batch(
                 if clean_scales is not None:
                     eu = torch.pdist(pts)
                     clean_scales.append(
-                        float(torch.median(eu).item()) if eu.numel() > 0 else 1.0
+                        float(torch.median(eu).item()) if eu.numel() > 0 else None
                     )
+                    if clean_scales[-1] is None:
+                        raise RuntimeError(
+                            "Euclidean teacher cloud has no pairwise distances for scale."
+                        )
                 continue
 
-            ideal_params = local_pca_ellipse_params(pts.unsqueeze(0), k=local_pca_k)
+            ideal_params = local_pca_ellipse_params(
+                pts.unsqueeze(0),
+                k=local_pca_k,
+                normalize_axes=local_pca_normalize_axes,
+            )
             d_batch = compute_distance_matrix_batch(
                 pts.unsqueeze(0),
                 ideal_params,

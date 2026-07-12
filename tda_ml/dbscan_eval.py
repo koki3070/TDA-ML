@@ -6,19 +6,18 @@ Per cloud: ellphi/mahalanobis DBSCAN for outlier labels (MCC), and topo W-Dist
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Iterator, Sequence
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Iterator, Sequence
 
 import numpy as np
 import torch
 from sklearn.cluster import DBSCAN
 
 from tda_ml.dbscan import compute_anisotropic_distance_matrix_np
-from tda_ml.metrics import compute_recall_specificity_gmean_mcc_wdist
-from tda_ml.topo_wdist import TopoWdistOptions
-
-DEFAULT_EPS_VALUES: list[float] = list(np.linspace(0.15, 1.5, 15))
-DEFAULT_MIN_SAMPLES_VALUES: list[int] = [3, 5, 7, 10, 15]
+from tda_ml.metrics import compute_recall_specificity_gmean_mcc
+from tda_ml.reproducibility import record_fallback, resolve_dbscan_grid, write_grid_log
+from tda_ml.topo_wdist import TopoWdistOptions, compute_topo_wdist
 
 
 @dataclass
@@ -43,6 +42,7 @@ class GridResult:
     min_samples: int
     n_clouds: int
     objective: str
+    grid_log: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -110,24 +110,48 @@ def prepare_clouds(
     return prepared
 
 
+def _topo_wdist_for_prepared_cloud(
+    cloud: PreparedCloud,
+    *,
+    topo_options: TopoWdistOptions | None,
+) -> float:
+    """Topo W-Dist for one cloud (independent of DBSCAN hyperparameters)."""
+    if topo_options is None:
+        raise ValueError("topo_options is required for topo W-Dist evaluation")
+    return float(
+        compute_topo_wdist(
+            cloud.points,
+            cloud.params,
+            cloud.clean_pc,
+            topo_options,
+        )
+    )
+
+
+def _dbscan_classification_metrics(
+    cloud: PreparedCloud,
+    eps: float,
+    min_samples: int,
+) -> tuple[float, float, float, float]:
+    db = DBSCAN(eps=eps, min_samples=min_samples, metric="precomputed")
+    labels = db.fit_predict(cloud.dist)
+    pred = dbscan_labels_to_outlier_pred(labels)
+    return compute_recall_specificity_gmean_mcc(cloud.labels_gt, pred)
+
+
 def _eval_prepared_cloud(
     cloud: PreparedCloud,
     eps: float,
     min_samples: int,
     *,
     topo_options: TopoWdistOptions | None = None,
+    wdist: float | None = None,
 ) -> CloudMetrics:
-    db = DBSCAN(eps=eps, min_samples=min_samples, metric="precomputed")
-    labels = db.fit_predict(cloud.dist)
-    pred = dbscan_labels_to_outlier_pred(labels)
-    recall, specificity, gmean, mcc, wdist = compute_recall_specificity_gmean_mcc_wdist(
-        cloud.labels_gt,
-        pred,
-        points=cloud.points,
-        params=cloud.params,
-        clean_pc=cloud.clean_pc,
-        topo_options=topo_options,
+    recall, specificity, gmean, mcc = _dbscan_classification_metrics(
+        cloud, eps, min_samples
     )
+    if wdist is None:
+        wdist = _topo_wdist_for_prepared_cloud(cloud, topo_options=topo_options)
     return CloudMetrics(recall, specificity, gmean, mcc, wdist)
 
 
@@ -148,13 +172,10 @@ def grid_search_prepared(
     min_samples_values: list[int],
     objective: str = "wdist",
     topo_options: TopoWdistOptions | None = None,
+    allow_skip_degenerate_grid_cells: bool = False,
+    manifest_ref: dict[str, Any] | None = None,
 ) -> GridResult:
-    """Grid-search DBSCAN over cached clouds; pick the best by ``objective``.
-
-    ``objective='wdist'`` minimizes mean topo W-Dist (independent of DBSCAN hparams).
-    ``objective='mcc'`` maximizes mean MCC. Returns aggregated metrics at the selected
-    hyperparameters.
-    """
+    """Grid-search DBSCAN over cached clouds; pick the best by ``objective``."""
     if objective not in ("wdist", "mcc"):
         raise ValueError(f"objective must be 'wdist' or 'mcc'; got {objective!r}")
     if not prepared:
@@ -163,12 +184,17 @@ def grid_search_prepared(
     minimize = objective == "wdist"
     best_score = float("inf") if minimize else -1.0
     best: GridResult | None = None
+    grid_log: list[dict[str, Any]] = []
+    cloud_wdists = [
+        _topo_wdist_for_prepared_cloud(cloud, topo_options=topo_options)
+        for cloud in prepared
+    ]
 
     for eps in eps_values:
         for min_samples in min_samples_values:
             rows: list[CloudMetrics] = []
-            ok = True
-            for cloud in prepared:
+            cell_error: str | None = None
+            for cloud, wdist in zip(prepared, cloud_wdists, strict=True):
                 try:
                     rows.append(
                         _eval_prepared_cloud(
@@ -176,15 +202,45 @@ def grid_search_prepared(
                             float(eps),
                             int(min_samples),
                             topo_options=topo_options,
+                            wdist=wdist,
                         )
                     )
-                except Exception:  # noqa: BLE001 — skip degenerate hyperparameters
-                    ok = False
+                except Exception as exc:
+                    cell_error = f"{type(exc).__name__}: {exc}"
                     break
-            if not ok or not rows:
-                continue
+            log_entry: dict[str, Any] = {
+                "eps": float(eps),
+                "min_samples": int(min_samples),
+            }
+            if cell_error is not None:
+                log_entry["status"] = "failed"
+                log_entry["error"] = cell_error
+                grid_log.append(log_entry)
+                if allow_skip_degenerate_grid_cells:
+                    if manifest_ref is not None:
+                        record_fallback(
+                            manifest_ref,
+                            "dbscan_grid_cell_skip",
+                            f"eps={eps} min_samples={min_samples}: {cell_error}",
+                        )
+                    continue
+                raise RuntimeError(
+                    "DBSCAN grid cell failed "
+                    f"(eps={eps}, min_samples={min_samples}): {cell_error}. "
+                    "Set reproducibility.allow_skip_degenerate_grid_cells=true to opt in "
+                    "to skipping failed cells."
+                )
             recall, specificity, gmean, mcc, wdist = _aggregate(rows)
             score = wdist if minimize else mcc
+            log_entry.update(
+                {
+                    "status": "ok",
+                    "mean_mcc": mcc,
+                    "mean_wdist": wdist,
+                    "n_clouds": len(rows),
+                }
+            )
+            grid_log.append(log_entry)
             is_better = score < best_score if minimize else score > best_score
             if is_better:
                 best_score = score
@@ -198,10 +254,15 @@ def grid_search_prepared(
                     min_samples=int(min_samples),
                     n_clouds=len(rows),
                     objective=objective,
+                    grid_log=grid_log.copy(),
                 )
 
     if best is None:
-        raise RuntimeError("DBSCAN grid search failed for all hyperparameters")
+        raise RuntimeError(
+            "DBSCAN grid search failed for all hyperparameters; "
+            f"see grid_log ({len(grid_log)} cells)"
+        )
+    best.grid_log = grid_log
     return best
 
 
@@ -210,23 +271,37 @@ def evaluate_model_grid(
     loader,
     device: torch.device,
     *,
+    config: dict[str, Any],
     backend: str,
     eps_values: list[float] | None = None,
     min_samples_values: list[int] | None = None,
     objective: str = "wdist",
     metric: str = "max",
     topo_options: TopoWdistOptions | None = None,
+    allow_skip_degenerate_grid_cells: bool = False,
+    grid_log_path: Path | str | None = None,
+    manifest_ref: dict[str, Any] | None = None,
 ) -> GridResult:
     """Forward ``loader`` through ``model`` and grid-search DBSCAN by ``objective``."""
+    eps_resolved, ms_resolved = resolve_dbscan_grid(
+        config,
+        eps_values=eps_values,
+        min_samples_values=min_samples_values,
+    )
     clouds = list(iter_cloud_predictions(model, loader, device))
     prepared = prepare_clouds(clouds, backend=backend, metric=metric)
-    return grid_search_prepared(
+    result = grid_search_prepared(
         prepared,
-        eps_values=eps_values or DEFAULT_EPS_VALUES,
-        min_samples_values=min_samples_values or DEFAULT_MIN_SAMPLES_VALUES,
+        eps_values=eps_resolved,
+        min_samples_values=ms_resolved,
         objective=objective,
         topo_options=topo_options,
+        allow_skip_degenerate_grid_cells=allow_skip_degenerate_grid_cells,
+        manifest_ref=manifest_ref,
     )
+    if grid_log_path is not None:
+        write_grid_log(grid_log_path, result.grid_log)
+    return result
 
 
 def evaluate_model_fixed(

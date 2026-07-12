@@ -25,6 +25,7 @@ def local_pca_ellipse_params(
     points: torch.Tensor,
     *,
     k: int = 10,
+    normalize_axes: bool = True,
 ) -> torch.Tensor:
     """
     Ideal ellipse parameters from local PCA only (no learned corrections).
@@ -32,12 +33,16 @@ def local_pca_ellipse_params(
     Args:
         points: ``(B, N, 2)`` or ``(N, 2)`` coordinates.
         k: number of Euclidean nearest neighbors (including self in the k-ball).
+        normalize_axes: if True, divide by the major semi-axis so ``a=1`` (aspect ratio
+            only). If False, use raw ``sqrt(eigenvalue)`` semi-axes ``(sqrt(l1), sqrt(l2))``.
 
     Returns:
-        ``(..., N, 3)`` with ``[a, b, theta]`` per point (major/minor normalized).
+        ``(..., N, 3)`` with ``[a, b, theta]`` per point.
     """
     if points.ndim == 2:
-        return local_pca_ellipse_params(points.unsqueeze(0), k=k).squeeze(0)
+        return local_pca_ellipse_params(
+            points.unsqueeze(0), k=k, normalize_axes=normalize_axes
+        ).squeeze(0)
 
     if points.ndim != 3 or points.shape[-1] != 2:
         raise ValueError(f"points must be (B, N, 2) or (N, 2); got {tuple(points.shape)}")
@@ -71,8 +76,9 @@ def local_pca_ellipse_params(
 
     base_axes = torch.sqrt(torch.clamp(e, min=EIGENVALUE_FLOOR))
     base_axes = torch.flip(base_axes, dims=[-1])
-    base_axes = base_axes / (
-        base_axes.max(dim=-1, keepdim=True)[0] + EIGENVALUE_FLOOR
-    )
+    if normalize_axes:
+        base_axes = base_axes / (
+            base_axes.max(dim=-1, keepdim=True)[0] + EIGENVALUE_FLOOR
+        )
 
     return torch.cat([base_axes, base_angle.unsqueeze(-1)], dim=-1).to(dtype=points.dtype)

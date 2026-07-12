@@ -14,10 +14,15 @@
 
   ```bash
   ./scripts/ensure_pytorch_topological.sh
+  ./scripts/ensure_ellphi_repo.sh
   uv sync --all-groups   # ローカル検証用に dev（pytest, ruff）を含める
   ```
 
-  `torch_topological` は **`pytorch-topological/` の path 依存**（`pyproject.toml`）であり、通常の `git clone` だけではディレクトリが揃いません。コミットは **`third_party/pytorch_topological.ref`** に固定し、**`scripts/ensure_pytorch_topological.sh`** がその ref に checkout します（CI と同じ）。サブモジュール gitlink がある場合は `git submodule update --init --recursive` のあとも ensure で pin を検証してください。詳細は `third_party/README.md`。
+  `torch_topological` は **`pytorch-topological/` の path 依存**（`pyproject.toml`）であり、通常の `git clone` だけではディレクトリが揃いません。コミットは **`third_party/pytorch_topological.ref`** に固定し、**`scripts/ensure_pytorch_topological.sh`** がその ref に checkout します（CI と同じ）。
+
+  `ellphi` も **`ellphi_repo/` の path 依存**です。fork の pin は **`third_party/ellphi.ref`**、取得は **`scripts/ensure_ellphi_repo.sh`**（CI と同じ）。`ellphi_repo/` 自体は git に含めません。PyPI の `ellphi==0.1.2` だけでは **`ellphi.grad`（学習用）が不足**するため、clone 後は ensure 必須です。
+
+  各 run の `logs/run_manifest.json` には `reproducibility.ellphi_repo` として **pin 済み SHA** と **インストール済み checkout SHA** が記録されます。不一致時は preflight が hard-fail します。
 
 - **PyTorch / CUDA**: 数値結果はデバイスや dtype によって変わり得ます。`tda_ml/main.py` の学習ループを使う場合、有効な設定は各実行の `logs/` 配下の `runtime_profile.json` などに記録されます。
 
@@ -32,6 +37,59 @@
 
 - `experiments/run_backend_multiseed.py` が内部で読み込む **`tda_ml/main.py`** の学習処理により、実行ごとのディレクトリ以下に成果物が書き出されます（README の「Expected artifacts」参照）。典型例は `logs/metrics.csv`、`logs/runtime_profile.json`、`best_model.pth`、可視化が有効なら `images/` などです。
 - **`outputs/`** は git の対象外です。論文用に実行ツリーを保存する場合は、原稿や付録で **コミットハッシュ・シード・使用した設定名** とあわせてパスを示すと追跡しやすいです。`progress_summary.csv` には絶対パスが入るため、共有時のプライバシーに注意してください。
+
+## 厳格な再現性インフラ（preflight / manifest）
+
+[Computational Reproducibility](https://github.com/t-uda/skills/blob/main/skills/computational-reproducibility/SKILL.md) に沿い、本リポジトリでは **暗黙 fallback を禁止**し、実行前検証と manifest 記録で監査可能にしています（実装: `tda_ml/preflight.py`, `tda_ml/reproducibility.py`）。
+
+### 実行前 preflight
+
+| 入口 | 出力 | 内容 |
+|------|------|------|
+| tune study | `STUDY_PREFLIGHT.json` | ベース config・DBSCAN grid・依存関係 |
+| tune 本番 run | `RUN_PREFLIGHT.json` | tune JSON の objective 種別（MCC / W-Dist）・checkpoint 選択方針 |
+| 学習 (`tda_ml.main`) | `logs/run_manifest.json` | preflight 通過後に学習開始；失敗時は `not-run` |
+| paper eval | run-dir 内 checkpoint 存在確認 | `best_model.pth` 必須（サイレント代替なし） |
+
+preflight 失敗時は **学習を開始せず** `run_status: not-run` を記録します。
+
+### `run_status` 語彙
+
+| 値 | 意味 |
+|----|------|
+| `pending` | manifest 作成直後（preflight 未実施） |
+| `not-run` | preflight 失敗により学習未開始 |
+| `running` | preflight 通過後、学習実行中 |
+| `completed` | 正常終了 |
+| `failed` | early-abort 等で異常終了 |
+| `skipped` / `empty-result` / `zero-result` | 集計・評価スクリプト側の失敗語彙 |
+
+`not-run` は preflight 専用です。学習中・中断 run を `not-run` と混同しないでください。
+
+### `configs/base.yaml` の `reproducibility.*`（strict 既定）
+
+| フラグ | 既定 | 効果 |
+|--------|------|------|
+| `strict_topo_samples` | `true` | 位相損失の NaN / 退化サンプルで hard-fail |
+| `allow_nan_batch_skip` | `false` | NaN loss バッチの skip は opt-in のみ（manifest に記録） |
+| `allow_empty_cloud_fallback` | `false` | 空点群の暗黙代替禁止 |
+| `allow_skip_degenerate_grid_cells` | `false` | DBSCAN grid 退化セルの skip は opt-in のみ |
+| `allow_otsu_threshold_fallback` | `false` | Otsu 閾値の暗黙 fallback 禁止 |
+| `allow_legacy_loss_keys` | `false` | `training.lambda_*` からの重み読み取り禁止；`loss.w_*` を明示 |
+
+opt-in fallback を有効にした場合、`run_manifest.json` の `fallbacks` 配列にイベントが追記されます。
+
+### 明示必須の評価 grid
+
+`evaluation.dbscan.eps_values` / `min_samples_values` / `backend` は **config に必須**です（Python 側の implicit default は削除済み）。ベースライン評価用の `evaluation.baselines.*` も同様です。
+
+### チェックポイント選択（本番プロトコル）
+
+既定は **`training.selection.metric: val_topo`**（`configs/base.yaml`）。学習中は `val_topo_loss` 最小の `best_model.pth` を保存し、DBSCAN grid は学習後の paper eval で一度だけ実行します。チューニング用に `wdist` / `dbscan_mcc` を選ぶ場合は docstring（`tda_ml/model_selection.py`）を参照してください。
+
+### 出力パス規約
+
+`tda_ml/run_paths.py` が `outputs/supervised` / `outputs/supervised_no_cls` / `outputs/tune` 配下の slug・タイムスタンプ命名を統一します。新規実験フォルダは `scripts/new_experiment.sh` を使用してください。
 
 ## 数値再現の公式手順
 

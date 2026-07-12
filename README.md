@@ -14,6 +14,12 @@ Use `uv` as the canonical dependency manager.
 ./scripts/ensure_pytorch_topological.sh
 ```
 
+`ellphi` is also a **local path dependency** (`pyproject.toml` → `ellphi_repo/`). Sync the pinned fork (differentiable tangency grad API) before `uv sync`:
+
+```bash
+./scripts/ensure_ellphi_repo.sh
+```
+
 Optional: if this repository records `pytorch-topological` as a git submodule gitlink, `git submodule update --init --recursive` may populate the tree first; the ensure script still verifies the pinned commit. See `third_party/README.md` when bumping the pin.
 
 Then install Python dependencies:
@@ -34,7 +40,7 @@ Optional package extras (e.g. `robustness_sweep`, HomCloud animation, explicit P
 uv sync --extra experiments --extra repro-pd-animation --extra images
 ```
 
-If you use `pip` instead of `uv`, run `./scripts/ensure_pytorch_topological.sh` from the repository root, then install from `pyproject.toml` with `pip install .` or `pip install -e .` for an editable install; add optional extras when needed (for example `pip install -e ".[experiments,repro-pd-animation,images]"`). There is no `requirements.txt`; dependency pins live in `uv.lock` for `uv` users.
+If you use `pip` instead of `uv`, run `./scripts/ensure_pytorch_topological.sh` and `./scripts/ensure_ellphi_repo.sh` from the repository root, then install from `pyproject.toml` with `pip install .` or `pip install -e .` for an editable install; add optional extras when needed (for example `pip install -e ".[experiments,repro-pd-animation,images]"`). There is no `requirements.txt`; dependency pins live in `uv.lock` for `uv` users.
 
 ## Minimal Reproduction
 
@@ -113,7 +119,12 @@ For **topological loss**, the batched distance matrix is built per `model.topolo
 
 This project is licensed under the MIT License. See `LICENSE`.
 
-External implementations (for example `ellphi_repo` and `pytorch-topological`) are reference-only and are not redistributed here.
+External implementations are reference-only and are not redistributed in this repository.
+
+- **ellphi (training / differentiable tangency):** requires the pinned fork checked out via `./scripts/ensure_ellphi_repo.sh` (`third_party/ellphi.ref` → `ellphi_repo/`). PyPI `ellphi==0.1.2` alone does **not** include the `ellphi.grad` API used for training. Fork: [koki3070/ellphi](https://github.com/koki3070/ellphi) (based on [t-uda/ellphi](https://github.com/t-uda/ellphi)).
+- **pytorch-topological:** [aidos-lab/pytorch-topological](https://github.com/aidos-lab/pytorch-topological) via `./scripts/ensure_pytorch_topological.sh`.
+
+Upstream references:
 
 - `https://github.com/t-uda/ellphi`
 - `https://github.com/aidos-lab/pytorch-topological`

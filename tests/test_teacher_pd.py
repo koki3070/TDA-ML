@@ -29,6 +29,16 @@ class TestTeacherMode(unittest.TestCase):
         self.assertTrue(torch.isfinite(params).all())
         self.assertTrue((params[:, 0:2] > 0).all())
 
+    def test_local_pca_raw_axes_not_unit_major(self):
+        torch.manual_seed(1)
+        pts = torch.randn(20, 2) * 0.1
+        pts[0] = torch.tensor([0.0, 0.0])
+        pts[1:] += torch.randn(19, 2) * 0.01
+        norm = local_pca_ellipse_params(pts, k=10, normalize_axes=True)
+        raw = local_pca_ellipse_params(pts, k=10, normalize_axes=False)
+        self.assertTrue(torch.allclose(norm[:, 0], torch.ones_like(norm[:, 0]), atol=1e-5))
+        self.assertGreater(float(raw[:, 0].max()), float(raw[:, 0].min()))
+
     def test_euclidean_teacher_runs(self):
         vr = VietorisRipsComplex(dim=1)
         clean = torch.randn(2, 15, 2)

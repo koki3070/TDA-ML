@@ -7,7 +7,7 @@ import os
 import torch
 
 from tda_ml.checkpoint_io import extract_model_state_dict, load_torch_checkpoint
-from tda_ml.config import deep_update, load_config, model_kwargs_from_config
+from tda_ml.config import deep_update, load_config, model_kwargs_from_config, default_project_root
 from tda_ml.model_selection import (
     compute_epoch_selection,
     selection_settings_from_config,
@@ -19,8 +19,18 @@ from tda_ml.run_setup import (
     resolve_dataloader_settings,
     resolve_device,
 )
+from tda_ml.run_paths import build_run_dir
 from tda_ml.runtime_profile import build_runtime_profile
 from tda_ml.seed_utils import set_global_seed
+from tda_ml.preflight import preflight_training_config
+from tda_ml.reproducibility import (
+    RUN_STATUS_COMPLETED,
+    RUN_STATUS_FAILED,
+    RUN_STATUS_NOT_RUN,
+    RUN_STATUS_RUNNING,
+    build_dbscan_eval_manifest_fields,
+    build_reproducibility_manifest_fields,
+)
 from tda_ml.supervised_diagnostics import (
     git_revision,
     run_abort_diagnostics,
@@ -47,30 +57,83 @@ def main(config_name=None, config=None, trial=None, config_overrides=None):
     
     logger.info("Loaded config: %s", config["meta"].get("config_id", "unknown"))
 
-    device = resolve_device(config)
-
     import datetime
-    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    config_id = config['meta'].get('config_id', 'unknown')
-    
-    # --- Directory Setup ---
-    if 'outputs' in config:
-        base_dir = config['outputs'].get('base_dir', 'outputs')
-        run_dir_name = f"{config_id}_{timestamp}"
-        run_dir = os.path.join(base_dir, run_dir_name)
-        
-        # Consistent directory names across the project
-        config['outputs']['log_dir'] = os.path.join(run_dir, 'logs')
-        config['outputs']['image_dir'] = os.path.join(run_dir, 'images')
-        
-        # Note: Trainer also calls makedirs to ensure robustness
-        os.makedirs(config['outputs']['log_dir'], exist_ok=True)
-        os.makedirs(config['outputs']['image_dir'], exist_ok=True)
-        
+
+    device = resolve_device(config)
+    config_id = config["meta"].get("config_id", "unknown")
+    run_dir = run_slug = run_stamp = None
+    log_dir = None
+    manifest_path = None
+
+    if "outputs" in config:
+        run_dir, run_slug, run_stamp = build_run_dir(config)
+        config["outputs"]["log_dir"] = os.path.join(run_dir, "logs")
+        config["outputs"]["image_dir"] = os.path.join(run_dir, "images")
+        log_dir = config["outputs"]["log_dir"]
+        os.makedirs(log_dir, exist_ok=True)
+        os.makedirs(config["outputs"]["image_dir"], exist_ok=True)
         logger.info("Project structure created at: %s", run_dir)
 
-    data_cfg = config['data']
-    seed = data_cfg.get('seed', 42)
+        data_cfg = config["data"]
+        seed = data_cfg.get("seed", 42)
+        manifest = {
+            "timestamp_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "source_revision": git_revision(),
+            "config_id": config_id,
+            "run_slug": run_slug,
+            "run_stamp": run_stamp,
+            "command_entry": "tda_ml.main",
+            "seed": seed,
+            "epochs_planned": config["training"]["epochs"],
+            "distance_backend": config.get("model", {})
+            .get("topology_loss", {})
+            .get("distance_backend", "mahalanobis"),
+            "checkpoint_selection": (config.get("training", {}).get("selection") or {}).get(
+                "metric", "val_topo"
+            ),
+            "early_abort": config.get("training", {}).get("early_abort"),
+            "run_dir": run_dir,
+            "run_status": "pending",
+            "final_status": "pending",
+            "preflight_status": "pending",
+            "fallback_status": "none",
+            "fallbacks": [],
+            "reproducibility": build_reproducibility_manifest_fields(
+                config, project_root=default_project_root()
+            ),
+        }
+        if config.get("evaluation"):
+            manifest["dbscan_eval"] = build_dbscan_eval_manifest_fields(config)
+        manifest.update(config.get("_manifest_extras") or {})
+        config.setdefault("_manifest", {})
+        manifest_path = os.path.join(log_dir, "run_manifest.json")
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, ensure_ascii=True, indent=2)
+        logger.info("Run manifest (pending) saved: %s", manifest_path)
+
+        try:
+            preflight_training_config(config, project_root=default_project_root())
+        except Exception as exc:
+            manifest["run_status"] = RUN_STATUS_NOT_RUN
+            manifest["final_status"] = RUN_STATUS_NOT_RUN
+            manifest["preflight_status"] = "failed"
+            manifest["preflight_error"] = str(exc)
+            with open(manifest_path, "w", encoding="utf-8") as f:
+                json.dump(manifest, f, ensure_ascii=True, indent=2)
+            raise
+        manifest["preflight_status"] = "passed"
+        manifest["run_status"] = RUN_STATUS_RUNNING
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, ensure_ascii=True, indent=2)
+    else:
+        preflight_training_config(config, project_root=default_project_root())
+        data_cfg = config["data"]
+        seed = data_cfg.get("seed", 42)
+        manifest = {"config_id": config_id, "seed": seed}
+        config.setdefault("_manifest", manifest)
+
+    data_cfg = config["data"]
+    seed = data_cfg.get("seed", 42)
     deterministic_algorithms = bool(config.get("reproducibility", {}).get("deterministic_algorithms", False))
     set_global_seed(seed, deterministic_algorithms=deterministic_algorithms)
     logger.info(
@@ -96,15 +159,15 @@ def main(config_name=None, config=None, trial=None, config_overrides=None):
     trainer = Trainer(model, config, device=device) 
 
     init_checkpoint = config.get('init_checkpoint')
-    if init_checkpoint and os.path.exists(init_checkpoint):
+    if init_checkpoint:
+        if not os.path.exists(init_checkpoint):
+            raise FileNotFoundError(f"Initial checkpoint not found: {init_checkpoint}")
         logger.info("Loading initial weights from %s", init_checkpoint)
         checkpoint = load_torch_checkpoint(init_checkpoint, map_location=device)
         model.load_state_dict(extract_model_state_dict(checkpoint), strict=False)
-    elif init_checkpoint:
-        logger.warning("Initial checkpoint not found at %s", init_checkpoint)
 
-    log_dir = config['outputs']['log_dir']
-    metrics_path = os.path.join(log_dir, 'metrics.csv')
+    log_dir = config["outputs"]["log_dir"]
+    metrics_path = os.path.join(log_dir, "metrics.csv")
     runtime_profile = build_runtime_profile(
         config=config,
         device=device,
@@ -120,26 +183,21 @@ def main(config_name=None, config=None, trial=None, config_overrides=None):
         json.dump(runtime_profile, f, ensure_ascii=True, indent=2)
     logger.info("Runtime profile saved: %s", runtime_profile_path)
 
-    manifest = {
-        "timestamp_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        "source_revision": git_revision(),
-        "config_id": config_id,
-        "command_entry": "tda_ml.main",
-        "seed": seed,
-        "epochs_planned": config["training"]["epochs"],
-        "distance_backend": config.get("model", {})
-        .get("topology_loss", {})
-        .get("distance_backend", "mahalanobis"),
-        "early_abort": config.get("training", {}).get("early_abort"),
-        "run_dir": run_dir,
-        "fallback_status": "not applicable",
-    }
-    manifest_path = os.path.join(log_dir, "run_manifest.json")
-    with open(manifest_path, "w", encoding="utf-8") as f:
-        json.dump(manifest, f, ensure_ascii=True, indent=2)
-    logger.info("Run manifest saved: %s", manifest_path)
+    if manifest_path is not None:
+        impl = config.get("_manifest", {}).get("distance_backend_impl")
+        if impl is not None:
+            manifest["distance_backend_impl"] = impl
+        manifest["final_status"] = "running"
+        manifest["run_status"] = RUN_STATUS_RUNNING
+        if config.get("_manifest", {}).get("fallbacks"):
+            manifest["fallbacks"] = config["_manifest"]["fallbacks"]
+            manifest["fallback_status"] = config["_manifest"].get(
+                "fallback_status", "recorded"
+            )
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, ensure_ascii=True, indent=2)
 
-    with open(metrics_path, 'w', newline='') as f:
+    with open(metrics_path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow([
             'epoch', 'train_loss', 'train_class_loss', 'train_topo_loss',
@@ -307,6 +365,7 @@ def main(config_name=None, config=None, trial=None, config_overrides=None):
             abort_report_path = write_abort_report(log_dir, report)
             logger.warning("Abort diagnostics: %s", abort_report_path)
             manifest["final_status"] = "early-aborted"
+            manifest["run_status"] = RUN_STATUS_FAILED
             manifest["abort_epoch"] = epoch
             manifest["abort_reason"] = abort_reason
             manifest["abort_report"] = str(abort_report_path)
@@ -317,6 +376,10 @@ def main(config_name=None, config=None, trial=None, config_overrides=None):
 
     if final_status == "completed":
         manifest["final_status"] = "completed"
+        manifest["run_status"] = RUN_STATUS_COMPLETED
+        if config.get("_manifest", {}).get("fallbacks"):
+            manifest["fallback_status"] = "recorded"
+            manifest["fallbacks"] = config["_manifest"]["fallbacks"]
         with open(manifest_path, "w", encoding="utf-8") as f:
             json.dump(manifest, f, ensure_ascii=True, indent=2)
 

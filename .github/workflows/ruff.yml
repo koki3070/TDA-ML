@@ -27,6 +27,10 @@ jobs:
       - name: Ensure pytorch-topological (uv path dependency)
         run: ./scripts/ensure_pytorch_topological.sh
 
+      # pyproject path dependency; pin matches third_party/ellphi.ref.
+      - name: Ensure ellphi_repo (uv path dependency)
+        run: ./scripts/ensure_ellphi_repo.sh
+
       - name: Install uv and Python 3.12
         uses: astral-sh/setup-uv@v5
         with:
@@ -34,7 +38,23 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies (all groups, incl. dev / ruff)
-        run: uv sync --all-groups --frozen
+        run: uv sync --all-groups --extra experiments --frozen
+
+      - name: Ellphi pin and grad API smoke
+        run: |
+          uv run python - <<'PY'
+          from pathlib import Path
+          from tda_ml.reproducibility import (
+              assert_ellphi_differentiable_available,
+              assert_ellphi_repo_matches_pin,
+              read_pinned_ellphi_revision,
+          )
+          pin = read_pinned_ellphi_revision(Path.cwd())
+          assert pin, "missing third_party/ellphi.ref"
+          assert_ellphi_repo_matches_pin(project_root=Path.cwd())
+          impl = assert_ellphi_differentiable_available(ellphi_differentiable=True)
+          print(f"ellphi ok pin={pin[:12]} impl={impl}")
+          PY
 
       - name: Ruff check (repo root; F-1 canonical command)
         run: uv run ruff check .
