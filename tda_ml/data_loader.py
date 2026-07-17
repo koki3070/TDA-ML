@@ -14,19 +14,25 @@ class NoisyMNISTDataset(Dataset):
     MNIST dataset converted to noisy 2D point clouds.
 
     Each image is binarized, converted to a set of (x, y) coordinates,
-    subsampled or padded to a fixed size, perturbed with Gaussian noise,
-    and augmented with uniformly random outlier points.
+    subsampled or padded to a fixed size, optionally perturbed with Gaussian
+    noise, and augmented with outlier points.
 
     Args:
         root (str): Path to store/load MNIST data.
         train (bool): Use training split if True, else test split.
         num_samples (int): Number of samples to use (randomly subsampled).
         max_points (int): Fixed number of inlier points per sample.
-        num_outliers (int): Number of random outlier points to add.
+        num_outliers (int): Number of outlier points to add.
         noise_std (float): Std of Gaussian jitter applied to inlier points.
         deterministic (bool): If True, fixes RNG per sample for reproducibility.
         indices (torch.Tensor, optional): Explicit index subset to use.
         noise_seed (int): Base seed for deterministic noise generation.
+        outlier_mode (str): ``uniform`` (``[-1,1]^2``) or ``local_pca_tangent``
+            (displace along local PCA PC1 of the clean inliers).
+        tangent_pca_k (int): Neighbor count for local PCA when
+            ``outlier_mode=local_pca_tangent``.
+        tangent_offset_min / tangent_offset_max (float): Displacement magnitude
+            range along PC1 (normalized coordinates).
 
     Returns (per item):
         data (Tensor): Shape (max_points + num_outliers, 2). Shuffled point cloud.
@@ -38,7 +44,11 @@ class NoisyMNISTDataset(Dataset):
                  max_points=150, num_outliers=20, noise_std=0.01,
                  deterministic=False, indices=None, noise_seed=0, preload=True,
                  allow_empty_cloud_fallback=False,
-                 allow_otsu_threshold_fallback=False):
+                 allow_otsu_threshold_fallback=False,
+                 outlier_mode="uniform",
+                 tangent_pca_k=10,
+                 tangent_offset_min=0.15,
+                 tangent_offset_max=0.40):
         self.max_points = max_points
         self.num_outliers = num_outliers
         self.noise_std = noise_std
@@ -47,6 +57,15 @@ class NoisyMNISTDataset(Dataset):
         self.preload = preload
         self.allow_empty_cloud_fallback = bool(allow_empty_cloud_fallback)
         self.allow_otsu_threshold_fallback = bool(allow_otsu_threshold_fallback)
+        mode = str(outlier_mode).strip().lower()
+        if mode not in ("uniform", "local_pca_tangent"):
+            raise ValueError(
+                f"outlier_mode must be 'uniform' or 'local_pca_tangent', got {outlier_mode!r}"
+            )
+        self.outlier_mode = mode
+        self.tangent_pca_k = int(tangent_pca_k)
+        self.tangent_offset_min = float(tangent_offset_min)
+        self.tangent_offset_max = float(tangent_offset_max)
 
         full_dataset = datasets.MNIST(root, train=train, download=True)
 
@@ -163,10 +182,25 @@ class NoisyMNISTDataset(Dataset):
             inliers = inliers + noise
 
         if self.num_outliers > 0:
-            if self.deterministic:
-                outliers = torch.rand(self.num_outliers, 2, generator=rng) * 2.0 - 1.0
+            if self.outlier_mode == "uniform":
+                if self.deterministic:
+                    outliers = torch.rand(self.num_outliers, 2, generator=rng) * 2.0 - 1.0
+                else:
+                    outliers = torch.rand(self.num_outliers, 2) * 2.0 - 1.0
             else:
-                outliers = torch.rand(self.num_outliers, 2) * 2.0 - 1.0
+                from tda_ml.tangent_outliers import sample_local_pca_tangent_outliers
+
+                # Local PCA on clean digit geometry (pre-jitter) so tangent is defined
+                # by the stroke, not by isotropic noise.
+                pca_src = clean_pc_points if clean_pc_points.shape[0] >= 2 else inliers
+                outliers = sample_local_pca_tangent_outliers(
+                    pca_src,
+                    self.num_outliers,
+                    k=self.tangent_pca_k,
+                    offset_min=self.tangent_offset_min,
+                    offset_max=self.tangent_offset_max,
+                    generator=rng,
+                )
         else:
             outliers = torch.empty(0, 2)
 

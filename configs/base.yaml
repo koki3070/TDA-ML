@@ -48,6 +48,9 @@ data:
   max_points: 100
   batch_size: 32
   num_outliers: 20
+  # Explicit outlier/noise geometry; run_setup hard-fails if these are absent.
+  outlier_mode: uniform      # uniform | local_pca_tangent
+  noise_std: 0.01
   num_workers: 2
   pin_memory: true
   seed: 42

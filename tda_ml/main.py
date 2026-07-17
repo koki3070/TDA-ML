@@ -93,6 +93,32 @@ def main(config_name=None, config=None, trial=None, config_overrides=None):
         init_checkpoint = config.get("init_checkpoint")
         if init_checkpoint and not os.path.exists(init_checkpoint):
             raise FileNotFoundError(f"Initial checkpoint not found: {init_checkpoint}")
+        if "outlier_mode" not in data_cfg:
+            raise ValueError(
+                "data.outlier_mode must be set explicitly (uniform|local_pca_tangent); "
+                "refusing silent uniform default in run manifest"
+            )
+        outlier_mode = str(data_cfg["outlier_mode"]).strip().lower()
+        if "noise_std" not in data_cfg:
+            raise ValueError(
+                "data.noise_std must be set explicitly; refusing silent default in run manifest"
+            )
+        data_outliers = {
+            "outlier_mode": outlier_mode,
+            "noise_std": float(data_cfg["noise_std"]),
+            "num_outliers": int(data_cfg["num_outliers"]),
+        }
+        if outlier_mode == "local_pca_tangent":
+            for key in ("tangent_pca_k", "tangent_offset_min", "tangent_offset_max"):
+                if key not in data_cfg:
+                    raise ValueError(
+                        f"data.{key} must be set explicitly for outlier_mode=local_pca_tangent"
+                    )
+            data_outliers.update(
+                tangent_pca_k=int(data_cfg["tangent_pca_k"]),
+                tangent_offset_min=float(data_cfg["tangent_offset_min"]),
+                tangent_offset_max=float(data_cfg["tangent_offset_max"]),
+            )
         manifest = {
             "timestamp_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "source_revision": git_revision(),
@@ -103,6 +129,7 @@ def main(config_name=None, config=None, trial=None, config_overrides=None):
             "seed": seed,
             "epochs_planned": config["training"]["epochs"],
             "distance_backend": str(topo_cfg["distance_backend"]).lower().strip(),
+            "data_outliers": data_outliers,
             "checkpoint_selection": selection["metric"],
             "early_abort": config.get("training", {}).get("early_abort"),
             "run_dir": run_dir,

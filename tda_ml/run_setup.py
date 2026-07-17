@@ -86,13 +86,30 @@ def build_dataloaders(config, seed: int, settings: DataLoaderSettings):
         persistent_workers=settings.persistent_workers,
         prefetch_factor=settings.prefetch_factor,
     )
+    if "outlier_mode" not in data_cfg:
+        raise ValueError(
+            "data.outlier_mode must be set explicitly (uniform|local_pca_tangent); "
+            "refusing silent uniform default"
+        )
+    outlier_mode = str(data_cfg["outlier_mode"]).strip().lower()
+    if outlier_mode not in ("uniform", "local_pca_tangent"):
+        raise ValueError(
+            f"data.outlier_mode must be 'uniform' or 'local_pca_tangent', got {outlier_mode!r}"
+        )
+    if "noise_std" not in data_cfg:
+        raise ValueError(
+            "data.noise_std must be set explicitly; refusing silent default"
+        )
+
     dataset_kwargs = dict(
         root="./data",
         max_points=data_cfg["max_points"],
         num_outliers=data_cfg["num_outliers"],
+        noise_std=float(data_cfg["noise_std"]),
         deterministic=True,
         noise_seed=seed,
-                 allow_empty_cloud_fallback=bool(
+        outlier_mode=outlier_mode,
+        allow_empty_cloud_fallback=bool(
             (config.get("reproducibility") or {}).get("allow_empty_cloud_fallback", False)
             or data_cfg.get("allow_empty_cloud_fallback", False)
         ),
@@ -101,6 +118,18 @@ def build_dataloaders(config, seed: int, settings: DataLoaderSettings):
             or data_cfg.get("allow_otsu_threshold_fallback", False)
         ),
     )
+
+    if outlier_mode == "local_pca_tangent":
+        for key in ("tangent_pca_k", "tangent_offset_min", "tangent_offset_max"):
+            if key not in data_cfg:
+                raise ValueError(
+                    f"data.{key} must be set explicitly for outlier_mode=local_pca_tangent"
+                )
+        dataset_kwargs.update(
+            tangent_pca_k=int(data_cfg["tangent_pca_k"]),
+            tangent_offset_min=float(data_cfg["tangent_offset_min"]),
+            tangent_offset_max=float(data_cfg["tangent_offset_max"]),
+        )
 
     train_dataset = NoisyMNISTDataset(train=True, indices=train_indices, **dataset_kwargs)
     train_loader = create_data_loader(train_dataset, shuffle=True, **loader_kwargs)

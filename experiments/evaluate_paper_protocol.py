@@ -148,16 +148,43 @@ def build_split_loader(config: dict[str, Any], split: str, device: torch.device)
     else:
         raise ValueError(f"split must be 'val' or 'test'; got {split!r}")
 
-    dataset = NoisyMNISTDataset(
+    if "outlier_mode" not in data_cfg:
+        raise ValueError(
+            "data.outlier_mode must be set explicitly (uniform|local_pca_tangent); "
+            "refusing silent uniform default"
+        )
+    outlier_mode = str(data_cfg["outlier_mode"]).strip().lower()
+    if outlier_mode not in ("uniform", "local_pca_tangent"):
+        raise ValueError(
+            f"data.outlier_mode must be 'uniform' or 'local_pca_tangent', got {outlier_mode!r}"
+        )
+    if "noise_std" not in data_cfg:
+        raise ValueError("data.noise_std must be set explicitly; refusing silent default")
+
+    dataset_kwargs: dict[str, Any] = dict(
         root=str(REPO_ROOT / "data"),
         train=train_flag,
         max_points=data_cfg["max_points"],
         num_outliers=data_cfg["num_outliers"],
+        noise_std=float(data_cfg["noise_std"]),
         indices=indices,
         deterministic=True,
         noise_seed=seed,
         preload=True,
+        outlier_mode=outlier_mode,
     )
+    if outlier_mode == "local_pca_tangent":
+        for key in ("tangent_pca_k", "tangent_offset_min", "tangent_offset_max"):
+            if key not in data_cfg:
+                raise ValueError(
+                    f"data.{key} must be set explicitly for outlier_mode=local_pca_tangent"
+                )
+        dataset_kwargs.update(
+            tangent_pca_k=int(data_cfg["tangent_pca_k"]),
+            tangent_offset_min=float(data_cfg["tangent_offset_min"]),
+            tangent_offset_max=float(data_cfg["tangent_offset_max"]),
+        )
+    dataset = NoisyMNISTDataset(**dataset_kwargs)
     loader = create_data_loader(
         dataset,
         batch_size=batch_size,
