@@ -24,6 +24,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--target-storage", required=True)
     parser.add_argument("--target-study", required=True)
     parser.add_argument("--top-k", type=int, required=True)
+    parser.add_argument(
+        "--rank-start",
+        type=int,
+        default=1,
+        help="1-based first proxy rank to enqueue (default: 1).",
+    )
+    parser.add_argument(
+        "--append-existing",
+        action="store_true",
+        help="Append selected trials to an existing target study (recovery only).",
+    )
     parser.add_argument("--out-dir", type=Path, required=True)
     return parser.parse_args()
 
@@ -32,6 +43,8 @@ def main() -> int:
     args = parse_args()
     if args.top_k < 1:
         raise ValueError(f"top-k must be >= 1, got {args.top_k}")
+    if args.rank_start < 1:
+        raise ValueError(f"rank-start must be >= 1, got {args.rank_start}")
     if args.out_dir.exists():
         raise FileExistsError(f"Refinement output already exists: {args.out_dir}")
 
@@ -43,13 +56,14 @@ def main() -> int:
         (trial for trial in source.trials if trial.state == TrialState.COMPLETE),
         key=lambda trial: float(trial.value),
     )
-    if len(complete) < args.top_k:
+    rank_stop = args.rank_start - 1 + args.top_k
+    if len(complete) < rank_stop:
         raise RuntimeError(
             f"Source study has {len(complete)} completed trials; "
-            f"need top_k={args.top_k}"
+            f"need ranks {args.rank_start}..{rank_stop}"
         )
 
-    selected = complete[: args.top_k]
+    selected = complete[args.rank_start - 1 : rank_stop]
     for trial in selected:
         missing = [name for name in REQUIRED_PARAMS if name not in trial.params]
         if missing:
@@ -62,7 +76,7 @@ def main() -> int:
         study_name=args.target_study,
         storage=args.target_storage,
         direction="minimize",
-        load_if_exists=False,
+        load_if_exists=args.append_existing,
     )
     for trial in selected:
         target.enqueue_trial(
@@ -85,6 +99,9 @@ def main() -> int:
         "target_study": args.target_study,
         "selection": "lowest proxy W-Dist",
         "top_k": args.top_k,
+        "rank_start": args.rank_start,
+        "rank_stop": rank_stop,
+        "append_existing": args.append_existing,
         "selected_trials": [
             {
                 "source_trial_number": trial.number,
