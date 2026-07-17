@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Paper-aligned evaluation: ellphi DBSCAN inference + MCC / G-Mean / topo W-Dist.
+Paper-aligned evaluation: mahalanobis DBSCAN inference + MCC / G-Mean / topo W-Dist.
 
 W-Dist matches ``TopologicalLoss``: learned ellipses on the full noisy cloud vs
 clean teacher PD (local PCA + ellphi by default). DBSCAN affects MCC only.
@@ -8,8 +8,8 @@ clean teacher PD (local PCA + ellphi by default). DBSCAN affects MCC only.
 Usage::
 
     uv run python experiments/evaluate_paper_protocol.py \\
-        --run-dir outputs/supervised/.../eph_s42_<stamp> \\
-        --base-config reproduce \\
+        --run-dir outputs/supervised/.../pwr_s42_<stamp> \\
+        --base-config elongate_n100_no_cls_full120_teacher_local_pca \\
         --split val
 
     uv run python experiments/evaluate_paper_protocol.py \\
@@ -278,6 +278,58 @@ def load_run_config(run_dir: Path, base_config: str, seed: int | None) -> dict[s
         manifest = json.loads(manifest_path.read_text())
         if seed is None:
             seed = manifest.get("seed")
+        loss_overrides = manifest.get("loss_overrides") or {}
+        if loss_overrides:
+            topo_patch: dict[str, Any] = {}
+            if "homology_dimensions" in loss_overrides:
+                topo_patch["homology_dimensions"] = loss_overrides["homology_dimensions"]
+            loss_patch = {
+                key: loss_overrides[key]
+                for key in (
+                    "aniso_mode",
+                    "size_mode",
+                    "size_ref",
+                    "size_power",
+                    "w_topo",
+                    "w_aniso",
+                    "w_size",
+                )
+                if key in loss_overrides
+            }
+            patch: dict[str, Any] = {}
+            if loss_patch:
+                patch["loss"] = loss_patch
+            if topo_patch:
+                patch["model"] = {"topology_loss": topo_patch}
+            if patch:
+                cfg = deep_update(cfg, patch)
+        contract = manifest.get("paper_no_cls_contract")
+        if isinstance(contract, dict):
+            # Prefer method fields recorded at train time when present.
+            loss_c = {
+                key: contract[key]
+                for key in (
+                    "teacher_mode",
+                    "aniso_mode",
+                    "size_mode",
+                    "w_class",
+                    "teacher_local_pca_k",
+                    "teacher_local_pca_normalize_axes",
+                )
+                if key in contract
+            }
+            topo_c = {
+                key: contract[key]
+                for key in ("homology_dimensions", "prob_weighting", "distance_backend")
+                if key in contract
+            }
+            patch = {}
+            if loss_c:
+                patch["loss"] = loss_c
+            if topo_c:
+                patch["model"] = {"topology_loss": topo_c}
+            if patch:
+                cfg = deep_update(cfg, patch)
     if seed is not None:
         cfg = deep_update(cfg, {"data": {"seed": int(seed)}})
     return cfg
@@ -286,10 +338,21 @@ def load_run_config(run_dir: Path, base_config: str, seed: int | None) -> dict[s
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--run-dir", type=Path, required=True)
-    p.add_argument("--base-config", type=str, default="reproduce")
+    p.add_argument(
+        "--base-config",
+        type=str,
+        default="elongate_n100_no_cls_full120_teacher_local_pca",
+        help="YAML used when run_manifest lacks method overrides (paper no_cls default).",
+    )
     p.add_argument("--split", choices=["val", "test"], required=True)
     p.add_argument("--seed", type=int, default=None, help="Override data.seed (else run_manifest)")
-    p.add_argument("--backend", type=str, default="ellphi", choices=["ellphi", "mahalanobis"])
+    p.add_argument(
+        "--backend",
+        type=str,
+        default="mahalanobis",
+        choices=["ellphi", "mahalanobis"],
+        help="DBSCAN backend for MCC (paper protocol default: mahalanobis).",
+    )
     p.add_argument(
         "--checkpoint-name",
         type=str,

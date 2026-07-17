@@ -11,6 +11,7 @@ from typing import Any, Sequence
 
 import numpy as np
 
+from tda_ml.preflight import PAPER_NO_CLS_CONTRACT, preflight_tune_json
 from tda_ml.supervised_diagnostics import git_revision
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -43,30 +44,37 @@ def discover_seed_metrics(out_base: Path, test_glob: str) -> dict[int, dict[str,
     for metrics_path in sorted(out_base.glob(test_glob)):
         run_dir = metrics_path.parent.parent
         manifest_path = run_dir / "logs" / "run_manifest.json"
-        seed: int | None = None
-        if manifest_path.is_file():
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            if manifest.get("seed") is not None:
-                seed = int(manifest["seed"])
-        if seed is None:
-            slug = run_dir.name
-            if slug.startswith("pwr_s"):
-                seed = int(slug.split("_")[1].replace("s", ""))
-        if seed is None:
+        if not manifest_path.is_file():
             raise ValueError(
-                f"Cannot resolve seed for metrics path {metrics_path}; "
-                "refusing silent skip"
+                f"Missing run_manifest.json for {metrics_path}; "
+                "refusing directory-name seed inference"
             )
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if manifest.get("seed") is None:
+            raise ValueError(
+                f"run_manifest.json missing seed for {metrics_path}; "
+                "refusing directory-name seed inference"
+            )
+        seed = int(manifest["seed"])
         payload = json.loads(metrics_path.read_text(encoding="utf-8"))
-        by_seed[seed] = {
+        row = {
             "seed": seed,
             "run_dir": str(run_dir),
             "metrics_path": str(metrics_path),
+            "tune_json": manifest.get("tune_json"),
+            "source_revision": manifest.get("source_revision"),
             "mcc": _first_key(payload, MCC_KEYS, label="mcc"),
             "gmean": _first_key(payload, GMEAN_KEYS, label="gmean"),
             "wdist": _first_key(payload, WDIST_KEYS, label="wdist"),
             "recall": float(payload["recall"]) if payload.get("recall") is not None else None,
         }
+        if seed in by_seed:
+            raise ValueError(
+                f"Duplicate metrics for seed={seed}: "
+                f"{by_seed[seed]['metrics_path']} and {metrics_path}; "
+                "refusing silent last-wins selection"
+            )
+        by_seed[seed] = row
     return by_seed
 
 
@@ -81,6 +89,21 @@ def aggregate_row(
     if missing:
         raise ValueError(
             f"{method}: missing seeds {missing}; refusing partial aggregate"
+        )
+    expected_tune = str(Path(tune_json).resolve())
+    mismatched = []
+    for seed in expected_seeds:
+        actual = by_seed[seed].get("tune_json")
+        if actual is None:
+            mismatched.append((seed, None))
+            continue
+        actual_resolved = str(Path(actual).resolve())
+        if actual_resolved != expected_tune:
+            mismatched.append((seed, actual_resolved))
+    if mismatched:
+        raise ValueError(
+            f"{method}: per-seed tune_json mismatch vs aggregate {expected_tune}: "
+            f"{mismatched}"
         )
     seeds_present = [by_seed[s] for s in expected_seeds]
 
@@ -97,7 +120,7 @@ def aggregate_row(
         "wdist_mean": float(np.mean(wdist)),
         "wdist_std": sample_std(wdist),
         "notes": (
-            f"{n}/{len(expected_seeds)} seeds; fixed tune weights from {tune_json}; "
+            f"{n}/{len(expected_seeds)} seeds; fixed tune weights from {expected_tune}; "
             "30ep val_topo ckpt; maha DBSCAN eval"
         ),
     }
@@ -148,6 +171,17 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    tune_paths = {
+        "wdist": Path(args.wdist_tune_json),
+        "mcc": Path(args.mcc_tune_json),
+    }
+    for key in args.methods:
+        path = tune_paths[key]
+        if not path.is_absolute():
+            path = REPO_ROOT / path
+        preflight_tune_json(path, expected_contract=PAPER_NO_CLS_CONTRACT)
+        tune_paths[key] = path.resolve()
+
     wdist_by_seed = discover_seed_metrics(
         args.wdist_out,
         "pwr_s*/logs/paper_metrics_test_power_wdist_valtopo_paper_eval.json",
@@ -158,8 +192,8 @@ def main() -> int:
     )
 
     method_specs = {
-        "wdist": ("proposed_wdist_tune_30ep", wdist_by_seed, args.wdist_tune_json),
-        "mcc": ("proposed_mcc_tune_30ep", mcc_by_seed, args.mcc_tune_json),
+        "wdist": ("proposed_wdist_tune_30ep", wdist_by_seed, str(tune_paths["wdist"])),
+        "mcc": ("proposed_mcc_tune_30ep", mcc_by_seed, str(tune_paths["mcc"])),
     }
     rows: list[dict[str, Any]] = []
     for key in args.methods:
@@ -183,6 +217,9 @@ def main() -> int:
         "seeds_expected": list(args.seeds),
         "wdist_out": str(args.wdist_out),
         "mcc_out": str(args.mcc_out),
+        "wdist_tune_json": str(tune_paths["wdist"]),
+        "mcc_tune_json": str(tune_paths["mcc"]),
+        "paper_no_cls_contract": PAPER_NO_CLS_CONTRACT,
         "per_seed": {
             "wdist": wdist_by_seed,
             "mcc": mcc_by_seed,

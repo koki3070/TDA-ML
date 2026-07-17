@@ -85,7 +85,7 @@ def build_trial_config(
     tune_epochs: int,
     out_base: str,
     trial_number: int,
-    size_mode: str = "quadratic",
+    size_mode: str = "power",
     size_ref: float = 1.34,
     size_power: float = 1.5,
 ) -> dict[str, Any]:
@@ -96,6 +96,8 @@ def build_trial_config(
             "w_aniso": float(w_aniso),
             "w_size": float(w_size),
             "w_topo": float(w_topo),
+            # Mirror paper contract / STUDY_PREFLIGHT overrides onto every trial.
+            "aniso_mode": "elongate",
             "size_mode": size_mode,
             "size_ref": float(size_ref),
             "size_power": float(size_power),
@@ -110,6 +112,7 @@ def build_trial_config(
             "topology_loss": {
                 "distance_backend": backend,
                 "prob_weighting": False,
+                "homology_dimensions": [1],
             }
         },
         "outputs": {"base_dir": out_base, "save_every": SAVE_EVERY},
@@ -214,7 +217,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--out-base", type=str, default="outputs/tune/pwr_wdist")
     p.add_argument(
         "--size-mode",
-        default="quadratic",
+        default="power",
         choices=["quadratic", "power", "softplus", "barrier"],
     )
     p.add_argument("--size-ref", type=float, default=1.34)
@@ -332,6 +335,10 @@ def main() -> int:
         "n_trials": args.n_trials,
         "max_complete_trials": args.max_complete_trials or args.n_trials,
         "n_startup_trials": args.n_startup_trials,
+        "source_revision": git_revision(REPO_ROOT),
+        "study_name": args.study_name,
+        "storage": args.storage,
+        "sampler_seed": args.seed,
         **preflight["paper_no_cls_contract"],
         "search_space": {
             "w_aniso": list(w_aniso_range),

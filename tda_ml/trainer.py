@@ -107,27 +107,43 @@ class Trainer:
         self.lambda_major = training_cfg.get("lambda_major", size_default)
         self.lambda_minor = training_cfg.get("lambda_minor", size_default)
 
-        self.aniso_mode = loss_cfg.get("aniso_mode", training_cfg.get("aniso_mode", "linear"))
+        aniso_raw = loss_cfg.get("aniso_mode", training_cfg.get("aniso_mode"))
+        if aniso_raw is None:
+            raise ValueError(
+                "loss.aniso_mode must be set explicitly; refusing silent linear default"
+            )
+        self.aniso_mode = str(aniso_raw).strip().lower()
         self.aniso_barrier_threshold = float(
             loss_cfg.get(
                 "aniso_barrier_threshold",
                 training_cfg.get("barrier_threshold", 6.0),
             )
         )
-        self.size_mode = str(
-            loss_cfg.get("size_mode", training_cfg.get("size_mode", "quadratic"))
-        ).strip().lower()
+        size_mode_raw = loss_cfg.get("size_mode", training_cfg.get("size_mode"))
+        if size_mode_raw is None:
+            raise ValueError(
+                "loss.size_mode must be set explicitly; refusing silent quadratic default"
+            )
+        self.size_mode = str(size_mode_raw).strip().lower()
         self.size_barrier_radius = float(
             loss_cfg.get(
                 "size_barrier_radius",
                 training_cfg.get("size_barrier_radius", 1.5),
             )
         )
+        if "size_ref" not in loss_cfg and "size_ref" not in training_cfg:
+            raise ValueError(
+                "loss.size_ref must be set explicitly; refusing silent 1.34 default"
+            )
+        if "size_power" not in loss_cfg and "size_power" not in training_cfg:
+            raise ValueError(
+                "loss.size_power must be set explicitly; refusing silent 1.5 default"
+            )
         self.size_ref = float(
-            loss_cfg.get("size_ref", training_cfg.get("size_ref", 1.34))
+            loss_cfg.get("size_ref", training_cfg.get("size_ref"))
         )
         self.size_power = float(
-            loss_cfg.get("size_power", training_cfg.get("size_power", 1.5))
+            loss_cfg.get("size_power", training_cfg.get("size_power"))
         )
         self.size_softplus_beta = float(
             loss_cfg.get(

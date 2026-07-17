@@ -178,6 +178,12 @@ def compute_topo_wdist(
             need_clean_scales=(opts.scale_mode == "median"),
         )
 
+        if opts.prob_weighting:
+            raise ValueError(
+                "compute_topo_wdist does not apply outlier-probability weighting; "
+                "set model.topology_loss.prob_weighting=false (refusing silent probs=None)"
+            )
+
         pts_i, par_i = _subsample_cloud(pts, par, opts.max_points)
         d_batch = compute_distance_matrix_batch(
             pts_i.unsqueeze(0),

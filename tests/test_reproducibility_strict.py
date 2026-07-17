@@ -192,6 +192,9 @@ class TestPaperNoClsContract(unittest.TestCase):
                 "teacher_mode": "local_pca",
                 "aniso_mode": "elongate",
                 "size_mode": "power",
+                "w_class": 0.0,
+                "teacher_local_pca_k": 10,
+                "teacher_local_pca_normalize_axes": True,
             },
         }
 

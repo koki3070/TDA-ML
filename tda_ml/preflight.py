@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from tda_ml.config import deep_update, load_config
+from tda_ml.persistence_dimensions import normalize_homology_dimensions
 from tda_ml.reproducibility import (
     RUN_STATUS_NOT_RUN,
     assert_ellphi_differentiable_available,
@@ -36,7 +37,12 @@ PAPER_NO_CLS_CONTRACT: dict[str, Any] = {
     "aniso_mode": "elongate",
     "distance_backend": "ellphi",
     "size_mode": "power",
+    "w_class": 0.0,
+    "teacher_local_pca_k": 10,
+    "teacher_local_pca_normalize_axes": True,
 }
+
+_KNOWN_TEACHER_MODES = frozenset({"euclidean", "local_pca"})
 
 
 def assert_paper_no_cls_contract(config: dict[str, Any]) -> dict[str, Any]:
@@ -83,6 +89,27 @@ def assert_paper_no_cls_contract(config: dict[str, Any]) -> dict[str, Any]:
             "Paper no_cls config must explicitly define loss.size_mode='power'"
         )
     actual["size_mode"] = str(loss["size_mode"]).strip().lower()
+
+    if "w_class" not in loss:
+        raise ValueError(
+            "Paper no_cls config must explicitly define loss.w_class=0.0"
+        )
+    actual["w_class"] = float(loss["w_class"])
+
+    if "teacher_local_pca_k" not in loss:
+        raise ValueError(
+            "Paper no_cls config must explicitly define loss.teacher_local_pca_k=10"
+        )
+    actual["teacher_local_pca_k"] = int(loss["teacher_local_pca_k"])
+
+    if "teacher_local_pca_normalize_axes" not in loss:
+        raise ValueError(
+            "Paper no_cls config must explicitly define "
+            "loss.teacher_local_pca_normalize_axes=true"
+        )
+    actual["teacher_local_pca_normalize_axes"] = bool(
+        loss["teacher_local_pca_normalize_axes"]
+    )
 
     if actual != PAPER_NO_CLS_CONTRACT:
         raise ValueError(
@@ -166,13 +193,21 @@ def preflight_training_config(
     backend = str(topo["distance_backend"]).lower().strip()
     if backend not in ("mahalanobis", "ellphi"):
         raise ValueError(f"Unknown distance_backend {backend!r}")
-    homology_dimensions = list(topo["homology_dimensions"])
-    if not homology_dimensions:
-        raise ValueError("model.topology_loss.homology_dimensions must not be empty")
+    homology_dimensions = list(normalize_homology_dimensions(topo["homology_dimensions"]))
     prob_weighting = bool(topo["prob_weighting"])
     teacher_mode = str(
         loss.get("teacher_mode", training.get("teacher_mode"))
     ).strip().lower()
+    if teacher_mode not in _KNOWN_TEACHER_MODES:
+        raise ValueError(
+            f"Unknown teacher_mode {teacher_mode!r}; "
+            f"supported={sorted(_KNOWN_TEACHER_MODES)}"
+        )
+    for key in ("aniso_mode", "size_mode"):
+        if key not in loss and key not in training:
+            raise ValueError(
+                f"loss.{key} must be set explicitly; refusing silent Trainer defaults"
+            )
     ellphi_diff = bool(topo.get("ellphi_differentiable", True))
     if backend == "ellphi":
         _require_import("ellphi", lambda: __import__("ellphi"))
@@ -233,6 +268,12 @@ def preflight_tune_json(
     for key in ("w_topo", "w_aniso", "w_size", "lr"):
         if key not in params:
             raise ValueError(f"Tune JSON best_params missing {key!r}: {tune_json}")
+    size_keys = ("size_ref" in params, "size_power" in params)
+    if any(size_keys) and not all(size_keys):
+        raise ValueError(
+            "Tune JSON best_params must define both size_ref and size_power "
+            f"together (or neither): {tune_json}"
+        )
     kind = classify_tune_objective(
         str(payload["objective"]),
         objective_kind=payload.get("objective_kind"),
@@ -268,21 +309,41 @@ def preflight_tune_study(
     config_overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     root = Path(project_root)
-    cfg = load_config(base_config, project_root=root)
-    if config_overrides:
-        cfg = deep_update(cfg, config_overrides)
-    contract = assert_paper_no_cls_contract(cfg)
-    dbscan_grid_from_config(cfg)
-    preview = preflight_training_config(cfg, project_root=root)
     out = Path(out_base)
     if not out.is_absolute():
         out = root / out
     out.mkdir(parents=True, exist_ok=True)
+    try:
+        cfg = load_config(base_config, project_root=root)
+        if config_overrides:
+            cfg = deep_update(cfg, config_overrides)
+        contract = assert_paper_no_cls_contract(cfg)
+        dbscan_grid_from_config(cfg)
+        preview = preflight_training_config(cfg, project_root=root)
+    except Exception as exc:
+        write_not_run_manifest(
+            out / "logs_not_run",
+            reason=str(exc),
+            entry=f"preflight_tune_study:{study_objective}",
+            config={"meta": {"config_id": base_config}, "data": {}},
+        )
+        write_json(
+            out / "STUDY_PREFLIGHT.json",
+            {
+                "run_status": RUN_STATUS_NOT_RUN,
+                "preflight_status": "failed",
+                "preflight_error": str(exc),
+                "base_config": base_config,
+                "study_objective": study_objective,
+            },
+        )
+        raise
     preview["out_base"] = str(out)
     preview["base_config"] = base_config
     preview["study_objective"] = study_objective
     preview["paper_no_cls_contract"] = contract
     preview["config_overrides"] = config_overrides or {}
+    preview["run_status"] = "pending"
     write_json(out / "STUDY_PREFLIGHT.json", preview)
     return preview
 
@@ -326,43 +387,71 @@ def preflight_tune_production_run(
     project_root: Path | str,
     out_base: Path | str,
     config_overrides: dict[str, Any] | None = None,
+    preflight_filename: str | None = None,
 ) -> dict[str, Any]:
     root = Path(project_root)
-    cfg = load_config(base_config, project_root=root)
-    if config_overrides:
-        cfg = deep_update(cfg, config_overrides)
-    contract = assert_paper_no_cls_contract(cfg)
-    tune_payload = preflight_tune_json(
-        tune_json,
-        expected_contract=contract,
-    )
-    tune_params = tune_payload["best_params"]
-    cfg = deep_update(
-        cfg,
-        {
-            "loss": {
-                "w_topo": float(tune_params["w_topo"]),
-                "w_aniso": float(tune_params["w_aniso"]),
-                "w_size": float(tune_params["w_size"]),
-            },
-            "training": {"lr": float(tune_params["lr"])},
-        },
-    )
-    preview = preflight_training_config(cfg, project_root=root)
-    preview["tune_json"] = str(tune_json.resolve())
-    preview["tune_objective"] = tune_payload.get("objective")
-    preview["tune_objective_kind"] = tune_payload["_objective_kind"]
-    preview["tune_best_params"] = tune_params
-    preview["paper_no_cls_contract"] = contract
-    preview["config_overrides"] = config_overrides or {}
-    preview["checkpoint_selection"] = (
-        (cfg.get("training") or {}).get("selection") or {}
-    ).get("metric", "val_topo")
     out = Path(out_base)
     if not out.is_absolute():
         out = root / out
     out.mkdir(parents=True, exist_ok=True)
-    write_json(out / "RUN_PREFLIGHT.json", preview)
+    artifact_name = preflight_filename or "RUN_PREFLIGHT.json"
+    try:
+        cfg = load_config(base_config, project_root=root)
+        if config_overrides:
+            cfg = deep_update(cfg, config_overrides)
+        contract = assert_paper_no_cls_contract(cfg)
+        tune_payload = preflight_tune_json(
+            tune_json,
+            expected_contract=contract,
+        )
+        tune_params = tune_payload["best_params"]
+        loss_apply: dict[str, Any] = {
+            "w_topo": float(tune_params["w_topo"]),
+            "w_aniso": float(tune_params["w_aniso"]),
+            "w_size": float(tune_params["w_size"]),
+        }
+        if "size_ref" in tune_params:
+            loss_apply["size_ref"] = float(tune_params["size_ref"])
+            loss_apply["size_power"] = float(tune_params["size_power"])
+        cfg = deep_update(
+            cfg,
+            {
+                "loss": loss_apply,
+                "training": {"lr": float(tune_params["lr"])},
+            },
+        )
+        preview = preflight_training_config(cfg, project_root=root)
+    except Exception as exc:
+        write_json(
+            out / artifact_name,
+            {
+                "run_status": RUN_STATUS_NOT_RUN,
+                "preflight_status": "failed",
+                "preflight_error": str(exc),
+                "tune_json": str(Path(tune_json).resolve())
+                if Path(tune_json).is_file()
+                else str(tune_json),
+                "base_config": base_config,
+            },
+        )
+        raise
+    preview["tune_json"] = str(Path(tune_json).resolve())
+    preview["tune_objective"] = tune_payload.get("objective")
+    preview["tune_objective_kind"] = tune_payload["_objective_kind"]
+    preview["tune_best_params"] = tune_params
+    preview["tune_source_revision"] = tune_payload.get("source_revision")
+    preview["tune_study_name"] = tune_payload.get("study_name")
+    preview["paper_no_cls_contract"] = contract
+    preview["config_overrides"] = config_overrides or {}
+    selection = (cfg.get("training") or {}).get("selection") or {}
+    if "metric" not in selection:
+        raise ValueError(
+            "training.selection.metric must be set explicitly; "
+            "refusing silent val_topo default in production preflight"
+        )
+    preview["checkpoint_selection"] = selection["metric"]
+    preview["applied_size_from_tune"] = "size_ref" in tune_params
+    write_json(out / artifact_name, preview)
     return preview
 
 

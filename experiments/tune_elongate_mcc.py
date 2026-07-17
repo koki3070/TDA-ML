@@ -99,6 +99,8 @@ def build_trial_config(
             "topology_loss": {
                 "distance_backend": backend,
                 "prob_weighting": False,
+                # Mirror paper contract / STUDY_PREFLIGHT overrides onto every trial.
+                "homology_dimensions": [1],
             }
         },
         "outputs": {"base_dir": out_base, "save_every": SAVE_EVERY},
@@ -327,6 +329,10 @@ def main() -> int:
         "tune_epochs": args.tune_epochs,
         "n_trials": args.n_trials,
         "max_complete_trials": args.max_complete_trials or args.n_trials,
+        "source_revision": git_revision(REPO_ROOT),
+        "study_name": args.study_name,
+        "storage": args.storage,
+        "sampler_seed": args.seed,
         **preflight["paper_no_cls_contract"],
         "search_space": {
             "w_aniso": list(W_ANISO_RANGE),

@@ -59,56 +59,91 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def load_tune_weights(path: Path) -> dict[str, float]:
+def load_tune_weights(
+    path: Path,
+    *,
+    size_ref_default: float,
+    size_power_default: float,
+) -> dict[str, float]:
     if not path.is_file():
         raise FileNotFoundError(f"Tune JSON not found: {path}")
     payload = json.loads(path.read_text(encoding="utf-8"))
     params = payload["best_params"]
-    return {
+    weights = {
         "w_topo": float(params["w_topo"]),
         "w_aniso": float(params["w_aniso"]),
         "w_size": float(params["w_size"]),
         "lr": float(params["lr"]),
     }
+    has_ref = "size_ref" in params
+    has_power = "size_power" in params
+    if has_ref != has_power:
+        raise ValueError(
+            "Tune JSON best_params must define both size_ref and size_power "
+            f"together (or neither): {path}"
+        )
+    if has_ref:
+        weights["size_ref"] = float(params["size_ref"])
+        weights["size_power"] = float(params["size_power"])
+        weights["size_from_tune"] = 1.0
+    else:
+        weights["size_ref"] = float(size_ref_default)
+        weights["size_power"] = float(size_power_default)
+        weights["size_from_tune"] = 0.0
+    return weights
 
 
 def infer_tag(tune_json: Path, explicit: str | None) -> str:
-    """Map tune objective to paper-eval tag; hard-fail on unknown objective."""
-    if explicit:
-        return explicit
+    """Map tune objective to paper-eval tag; hard-fail on unknown / mismatched tag."""
     payload = json.loads(tune_json.read_text(encoding="utf-8"))
     kind = classify_tune_objective(
         str(payload.get("objective", "")),
         objective_kind=payload.get("objective_kind"),
     )
-    return TAG_WDIST if kind == "wdist" else TAG_MCC
+    expected = TAG_WDIST if kind == "wdist" else TAG_MCC
+    if explicit is not None and explicit != expected:
+        raise ValueError(
+            f"--tag {explicit!r} does not match tune objective kind {kind!r} "
+            f"(expected tag {expected!r})"
+        )
+    return expected
 
 
 def main() -> int:
     args = parse_args()
     cfg = load_config(args.base_config, project_root=REPO_ROOT)
     paper_contract = assert_paper_no_cls_contract(cfg)
-    tune_json = args.tune_json
+    tune_json = args.tune_json.resolve()
     tag = infer_tag(tune_json, args.tag)
     out_base = args.out_base
     if out_base is None:
         if tag == TAG_WDIST:
             out_base = REPO_ROOT / "outputs/supervised/pwr30_wdist"
         else:
-            out_base = REPO_ROOT / "outputs/supervised/pwr30_mcc"
+            out_base = REPO_ROOT / "outputs/supervised/pwr30_mcc_maha"
+    out_base = out_base.resolve()
     out_base.mkdir(parents=True, exist_ok=True)
+
+    tune_weights = load_tune_weights(
+        tune_json,
+        size_ref_default=args.size_ref,
+        size_power_default=args.size_power,
+    )
+    size_ref = tune_weights["size_ref"]
+    size_power = tune_weights["size_power"]
 
     preflight_tune_production_run(
         base_config=args.base_config,
         tune_json=tune_json,
         project_root=REPO_ROOT,
         out_base=out_base,
+        preflight_filename=f"RUN_PREFLIGHT_s{args.seed}.json",
         config_overrides={
             "loss": {
                 "aniso_mode": "elongate",
                 "size_mode": "power",
-                "size_ref": args.size_ref,
-                "size_power": args.size_power,
+                "size_ref": size_ref,
+                "size_power": size_power,
             },
             "training": {"epochs": args.epochs},
             "data": {"seed": args.seed},
@@ -126,19 +161,13 @@ def main() -> int:
     loss_overrides: dict = {
         "aniso_mode": "elongate",
         "size_mode": "power",
-        "size_ref": args.size_ref,
-        "size_power": args.size_power,
+        "size_ref": size_ref,
+        "size_power": size_power,
+        "w_topo": tune_weights["w_topo"],
+        "w_aniso": tune_weights["w_aniso"],
+        "w_size": tune_weights["w_size"],
     }
-    training_overrides: dict = {"epochs": args.epochs}
-    tune_weights = load_tune_weights(tune_json)
-    loss_overrides.update(
-        {
-            "w_topo": tune_weights["w_topo"],
-            "w_aniso": tune_weights["w_aniso"],
-            "w_size": tune_weights["w_size"],
-        }
-    )
-    training_overrides["lr"] = tune_weights["lr"]
+    training_overrides: dict = {"epochs": args.epochs, "lr": tune_weights["lr"]}
     tune_source = str(tune_json)
 
     cfg = deep_update(
@@ -164,9 +193,11 @@ def main() -> int:
 
     purpose = {
         "tag": tag,
+        "seed": args.seed,
         "size_mode": cfg["loss"]["size_mode"],
         "size_ref": cfg["loss"]["size_ref"],
         "size_power": cfg["loss"]["size_power"],
+        "size_from_tune": bool(tune_weights["size_from_tune"]),
         "weights": {
             "w_topo": cfg["loss"]["w_topo"],
             "w_aniso": cfg["loss"]["w_aniso"],
@@ -187,10 +218,12 @@ def main() -> int:
     }
     cfg["_manifest_extras"] = {
         "tune_json": tune_source,
-        "tune_objective": purpose.get("tune_json")
-        and json.loads(Path(tune_source).read_text(encoding="utf-8")).get("objective"),
+        "tune_objective": json.loads(tune_json.read_text(encoding="utf-8")).get(
+            "objective"
+        ),
         "checkpoint_selection": cfg["training"]["selection"]["metric"],
         "paper_eval_dbscan_backend": args.dbscan_backend,
+        "paper_no_cls_contract": paper_contract,
         "loss_overrides": {
             "size_mode": purpose["size_mode"],
             "size_ref": purpose["size_ref"],
@@ -203,17 +236,21 @@ def main() -> int:
         },
     }
 
-    (out_base / "RUN_PLAN.json").write_text(
+    # Per-seed artifacts avoid parallel workers clobbering a shared RUN_PLAN.json.
+    plan_name = f"RUN_PLAN_s{args.seed}.json"
+    (out_base / plan_name).write_text(
         json.dumps(purpose, indent=2) + "\n", encoding="utf-8"
     )
-    # Legacy alias
-    (out_base / "PURPOSE.json").write_text(
+    (out_base / f"PURPOSE_s{args.seed}.json").write_text(
         json.dumps(purpose, indent=2) + "\n", encoding="utf-8"
     )
 
     result = train_main(config=cfg)
     run_dir = Path(result["run_dir"])
     print(f"run_dir={run_dir}")
+    (run_dir / "RUN_PLAN.json").write_text(
+        json.dumps(purpose, indent=2) + "\n", encoding="utf-8"
+    )
 
     if args.skip_eval:
         return 0

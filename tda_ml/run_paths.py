@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-_TIMESTAMP_FMT = "%m%d_%H%M"
+_TIMESTAMP_FMT = "%m%d_%H%M%S"
 OUTPUT_CATEGORIES = frozenset({"supervised", "supervised_no_cls", "tune"})
 
 _BACKEND_SHORT = {
@@ -81,12 +81,20 @@ def build_run_dir(
     config: dict[str, Any],
     when: datetime.datetime | None = None,
 ) -> tuple[str, str, str]:
-    """Return ``(run_dir, run_slug, run_stamp)``."""
+    """Return ``(run_dir, run_slug, run_stamp)``.
+
+    Hard-fails if the resolved path already exists so two runs never merge
+    checkpoints/metrics into one directory.
+    """
     base_dir = config.get("outputs", {}).get("base_dir", "outputs")
     slug = resolve_run_slug(config)
     stamp = make_run_stamp(when)
-    run_dir = str(Path(base_dir) / f"{slug}_{stamp}")
-    return run_dir, slug, stamp
+    run_path = Path(base_dir) / f"{slug}_{stamp}"
+    if run_path.exists():
+        raise FileExistsError(
+            f"run_dir already exists: {run_path}; refusing to merge separate runs"
+        )
+    return str(run_path), slug, stamp
 
 
 def experiment_base(category: str, slug: str, when: datetime.datetime | None = None) -> str:

@@ -45,6 +45,10 @@ class TestTrainer(unittest.TestCase):
                 'w_aniso': 0.01,
                 'w_size': 0.1,
                 'teacher_mode': 'euclidean',
+                'aniso_mode': 'linear',
+                'size_mode': 'quadratic',
+                'size_ref': 1.34,
+                'size_power': 1.5,
             },
             'model': {
                 'topology_loss': {
@@ -100,6 +104,10 @@ class TestTrainer(unittest.TestCase):
             "w_aniso": 0.01,
             "w_size": 0.1,
             "teacher_mode": "euclidean",
+            "aniso_mode": "linear",
+            "size_mode": "quadratic",
+            "size_ref": 1.34,
+            "size_power": 1.5,
         }
         self.config["model"]["topology_loss"]["prob_weighting"] = False
         trainer = Trainer(self.model, self.config, self.device)
