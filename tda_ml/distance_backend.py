@@ -58,18 +58,22 @@ def rescale_distance_matrix(
 
     ``clean_scale`` (m_e) is the median pairwise Euclidean distance of the teacher
     cloud for this sample. In ``median`` mode the prediction is scaled so its median
-    matches m_e, i.e. it is brought onto the (untouched) teacher's Euclidean scale;
-    without m_e it falls back to a per-sample unit median. Any other ``scale_mode``
-    applies the fixed scalar ``eps_scale`` (1.0 == no-op).
+    matches m_e. ``clean_scale`` is required (missing scale hard-fails). Any other
+    ``scale_mode`` applies the fixed scalar ``eps_scale`` (1.0 == no-op).
     """
     if scale_mode == "median":
+        if clean_scale is None:
+            raise RuntimeError(
+                "scale_mode='median' requires clean_scale (teacher median Euclidean); "
+                "refusing silent unit-median fallback."
+            )
         off = d_mat[d_mat > 0]
         if off.numel() == 0:
-            return d_mat
+            raise RuntimeError(
+                "scale_mode='median' found no positive off-diagonal distances."
+            )
         denom = torch.median(off).detach() + NUMERICAL_EPS
-        if clean_scale is not None:
-            return d_mat * (float(clean_scale) / denom)
-        return d_mat / denom
+        return d_mat * (float(clean_scale) / denom)
     if eps_scale != 1.0:
         return d_mat * eps_scale
     return d_mat
@@ -117,6 +121,7 @@ def compute_distance_matrix_batch(
     symmetrize: str,
     backend: str,
     ellphi_differentiable: bool = True,
+    allow_topo_center_separation: bool = False,
 ) -> torch.Tensor:
     """
     Compute batched distance matrices with shape ``(B, N, N)``.
@@ -124,8 +129,11 @@ def compute_distance_matrix_batch(
     backend:
       - ``mahalanobis``: ``compute_anisotropic_distance_matrix`` (differentiable)
       - ``ellphi``: tangency distance. If ``ellphi_differentiable=True`` and
-        ``ellphi.grad`` is available, gradients flow to centers/covariances
-        (therefore to ellipse parameters).
+        ``ellphi.grad`` is available, gradients flow to centers/covariances.
+        Missing grad API is a hard-fail (no NumPy fallback).
+
+    ``allow_topo_center_separation``: when True, nudge coincident ellipse centers
+    by ``TOPO_CENTER_SEPARATION_MIN`` before ellphi (opt-in; default off).
 
     For ``ellphi``, ``probs``-based weighting is currently unsupported and ignored.
     """
@@ -167,6 +175,8 @@ def compute_distance_matrix_batch(
     for i in range(batch_size):
         if use_torch:
             c, cov = ellipse_params_to_centers_cov(points[i], params[i])
+            if allow_topo_center_separation:
+                c = separate_coincident_centers_for_topo(c, TOPO_CENTER_SEPARATION_MIN)
             mats.append(pdist_tangency_matrix_differentiable(c, cov))
         else:
             dm = compute_ellphi_distance_matrix_np(
@@ -188,8 +198,7 @@ def compute_topo_distance_matrix(
     Shared topology-loss entrypoint: map batched points/ellipse params to ``(B,N,N)`` distances.
 
     ``distance_mode`` is ``mahalanobis`` or ``ellphi``.
-    When ``ellphi_backend='auto'``, a differentiable ellphi path is preferred and
-    falls back to NumPy when unavailable.
+    Differentiable ellphi requires ``ellphi.grad``; otherwise hard-fail.
     """
     backend = normalize_topo_distance_mode(distance_mode)
     eb = str(ellphi_backend).strip().lower()

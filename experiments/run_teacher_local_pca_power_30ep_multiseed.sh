@@ -39,13 +39,14 @@ else
   SEEDS=(42 123 456 789 1024)
 fi
 
-WDIST_JSON="${WDIST_JSON:-outputs/tune/0709_pwr_wdist/best_elongate_wdist_ellphi.json}"
-MCC_JSON="${MCC_JSON:-outputs/tune/0709_pwr_mcc_dbscan_mahalanobis/best_elongate_mcc_ellphi_dbscan_mahalanobis.json}"
-WDIST_OUT="${WDIST_OUT:-outputs/supervised/0710_pwr30_wdist}"
-MCC_OUT="${MCC_OUT:-outputs/supervised/0710_pwr30_mcc_maha}"
-LOG_ROOT="${LOG_ROOT:-outputs/supervised/0710_pwr30_multiseed}"
+WDIST_JSON="${WDIST_JSON:-outputs/tune/pwr_wdist/best_elongate_wdist_ellphi.json}"
+MCC_JSON="${MCC_JSON:-outputs/tune/pwr_mcc_dbscan_mahalanobis/best_elongate_mcc_ellphi_dbscan_mahalanobis.json}"
+WDIST_OUT="${WDIST_OUT:-outputs/supervised/pwr30_wdist}"
+MCC_OUT="${MCC_OUT:-outputs/supervised/pwr30_mcc_maha}"
+LOG_ROOT="${LOG_ROOT:-outputs/supervised/pwr30_multiseed}"
 EPOCHS="${EPOCHS:-30}"
 DBSCAN_BACKEND="${DBSCAN_BACKEND:-mahalanobis}"
+BASE_CONFIG="${BASE_CONFIG:-elongate_n100_no_cls_full120_teacher_local_pca}"
 
 mkdir -p "${LOG_ROOT}"
 
@@ -80,6 +81,7 @@ _run_seed() {
   MKL_NUM_THREADS="${THREADS_PER_WORKER}" \
   OPENBLAS_NUM_THREADS="${THREADS_PER_WORKER}" \
   uv run python -u experiments/run_teacher_local_pca_power_30ep.py \
+    --base-config "${BASE_CONFIG}" \
     --epochs "${EPOCHS}" \
     --seed "${seed}" \
     --out-base "${out_base}" \

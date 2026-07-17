@@ -4,7 +4,10 @@ import unittest
 
 import torch
 
-from tda_ml.losses import AnisotropyPenaltyLoss, SizeRegularizationLoss
+from tda_ml.losses import (
+    AnisotropyPenaltyLoss,
+    SizeRegularizationLoss,
+)
 
 
 class TestEllipseBarrierLosses(unittest.TestCase):

@@ -1,6 +1,5 @@
-# Ablation: paper §3.3.2 teacher (local PCA ideal ellipses + same backend as prediction).
-# Loss weights: baseline (maha-tune v1 anchors). v3 topo-only tune (w_size≈0) hurt DBSCAN MCC — reverted 2026-07-06.
-# Switch teacher: loss.teacher_mode = euclidean | local_pca
+# Paper no_cls production: local-PCA teacher + ellphi topo + H1-only Wasserstein.
+# Degenerate ellphi geometry hard-fails (no axis projection / min_b floor).
 
 meta:
   config_id: "elongate_n100_no_cls_full120_teacher_local_pca"
@@ -12,9 +11,10 @@ model:
   threshold: 0.5
   topology_loss:
     metric_type: "anisotropic"
-    distance_backend: "mahalanobis"  # overridden per run by run_backend_multiseed
+    distance_backend: "mahalanobis"  # overridden per run by production driver
     ellphi_differentiable: true
     prob_weighting: false
+    homology_dimensions: [1]
 
 loss:
   w_class: 0.0
@@ -22,14 +22,12 @@ loss:
   w_aniso: 0.0541
   w_size: 0.488
   pos_weight: 1.0
-  aniso_mode: "elongate"
+  aniso_mode: elongate
   size_mode: power
   size_ref: 1.34
   size_power: 1.5
   teacher_mode: local_pca
   teacher_local_pca_k: 10
-  # Must match the tune base (elongate_n100_no_cls_tune_local_pca_ellphi_power_mcc);
-  # tuned weights assume this teacher geometry.
   teacher_local_pca_normalize_axes: true
 
 training:
@@ -38,8 +36,6 @@ training:
   grad_clip_value: 1.0
   visualize_every: 10
   warmup_epochs: 0
-  # Train ckpt: val_topo (same TopologicalLoss as training; no per-epoch DBSCAN grid).
-  # DBSCAN grid + MCC: once after training via evaluate_paper_protocol.py (val → test).
   selection:
     metric: val_topo
     eval_every: 1

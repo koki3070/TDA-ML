@@ -7,21 +7,31 @@
 - **含む:** `tda_ml/`、**`configs/` 直下の正本 YAML**（`base.yaml` と `reproduce` / `dev` / `prod` / `test_fast`、および論文比較用の `elongate_n100_no_cls_*`）、`tests/`、追跡されている `scripts/`、論文・再現用 `experiments/`（下記）、および `README.md` / `REPRODUCIBILITY.md` / `pyproject.toml` / `uv.lock` / `LICENSE` / `CITATION.cff` などのメタデータ。
 - **含めない:** `docs/` 以下（**ローカル実験メモ**；公開方針で git に入れる場合は別途決定）、`configs/archive/`（履歴用 YAML を置く場合は **ローカルのみ**）、`outputs/`、`data/`、`.cursor/` など。`load_config("archive/...")` は、手元に `configs/archive/*.yaml` を置いた場合にのみ使えます。
 
-### 論文比較（ellphi + power 二目的）で使う `experiments/`（2026-07-12）
+### 論文比較（ellphi + power 二目的）で使う `experiments/`
 
-**現在の主 run:** W-Dist tune 重みの 30ep 5-seed（`run_teacher_local_pca_power_30ep_multiseed.sh wdist`）。
+**論文主表の提案:** W-Dist tune 重みの 30ep 5-seed（`run_teacher_local_pca_power_30ep_multiseed.sh wdist`）。
+**主張:** Euclidean DBSCAN / ADBSCAN と **同程度の外れ値除去性能**（MCC / G-Mean）。主表に Topo W. 列は載せない。
+**正本 config:** `elongate_n100_no_cls_full120_teacher_local_pca`（`w_class=0`, `homology_dimensions=[1]`, `aniso_mode=elongate`, 軸投影・`min_b` 床なし）。
+出力先は `WDIST_OUT` / `MCC_OUT` / `LOG_ROOT`（既定: `outputs/supervised/pwr30_*`）で明示する（生成物は git に含めない）。
 
 | 区分 | パス |
 |------|------|
-| 本番 5-seed（計算中） | `run_teacher_local_pca_power_30ep_multiseed.sh`, `run_teacher_local_pca_power_30ep.py`, `aggregate_power_30ep_multiseed.py` |
+| 本番 5-seed | `run_teacher_local_pca_power_30ep_multiseed.sh`, `run_teacher_local_pca_power_30ep.py`, `aggregate_power_30ep_multiseed.py` |
 | paper eval | `evaluate_paper_protocol.py` |
 | ベースライン | `evaluate_paper_baselines.py` |
 | チューニング（重みの出所） | `tune_elongate_wdist.py`, `tune_elongate_mcc.py`, `run_tune_local_pca_power_*` |
-| 補助 | `launch_detached_screen.sh` |
-
-プロトコル・ソース一覧の詳細: ローカル `docs/experiments/20260710_power_dual_objective.md`（§使用ソースコード）、公開前添削: `docs/experiments/20260712_publication_scope.md`。
 
 **実行記録:** 各 run の `source_revision`（git HEAD）は `logs/run_manifest.json` および `paper_metrics_*.json` に記録。未コミットのまま実行した場合、リモート clone では数値が再現できない。
+
+### W-Dist 契約（場所ごとの定義）
+
+| 経路 | homology | 距離 / filtration | 備考 |
+|------|----------|-------------------|------|
+| 訓練 `TopologicalLoss` / eval `compute_topo_wdist` | config の `homology_dimensions`（主表は `[1]`） | ellipse filtration + Wasserstein-2²（torch_topological） | 教師は `loss.teacher_mode`（主表 `local_pca`） |
+| Gudhi `persistence.compute_w_distance` | H1-only | Euclidean Alpha / 点座標 | legacy baseline 用。主表の ellipse W-Dist とは別物 |
+| `metrics` の W-Dist | 上記どちらかを明示引数で選択 | 引数不足は **hard-fail**（黙って 0 にしない） | |
+
+Trainer と `TopoWdistOptions` の欠落時既定はどちらも `teacher_mode=euclidean` / `prob_weighting=true`。主表 YAML が `local_pca` と `prob_weighting=false` を明示する。
 
 ## 環境
 
@@ -171,7 +181,12 @@ clip や sigmoid による軸倍率の暗黙クリップは行わない。ellphi
 M_i=\max(a_i,b_i),\; m_i=\min(a_i,b_i).
 \]
 
-主表 config では `aniso_mode: linear` により
+主表 power 30ep config（`elongate_n100_no_cls_full120_teacher_local_pca`）では
+`homology_dimensions: [1]`（H1-only Wasserstein）と `aniso_mode: elongate` を用いる。
+ellphi 退化（NaN 共分散・接線距離未定義など）は **軸投影や min_b 床で隠さず**
+`run_status: failed` とする（[Computational Reproducibility skill](https://github.com/t-uda/skills/blob/main/skills/computational-reproducibility/SKILL.md)）。
+
+別 ablation では `aniso_mode: linear` により
 $\mathcal{L}_{\mathrm{aniso}} = \frac{1}{N}\sum_i R_i$（$R_i=M_i/m_i$）。
 図用 ablation（`ablation_localscale_try2` 等）では
 `aniso_mode: barrier` として
@@ -180,7 +195,7 @@ $\mathcal{L}_{\mathrm{aniso}} = \frac{10}{N}\sum_i \mathrm{ReLU}(R_i-\tau)^2$。
 **Mahalanobis 距離**（`tda_ml/topology.py`）は outlier 確率 $p_i$ により二乗距離を
 $1/\bigl((1-p_i)(1-p_j)\bigr)$ で重み付け（`INLIER_PROB_MIN` で下限クリップ）。
 
-**数値安定化のみの定数**（モデリング床ではない）は `tda_ml/numerical_eps.py` に集約し、付録で列挙します。encoder の `clamp(0.2)` や legacy の `+10^{-4}` といった**論文に無い床は削除済み**（issue #59）。
+**数値安定化のみの定数**（モデリング床ではない）は `tda_ml/numerical_eps.py` に集約し、付録で列挙します。encoder の `clamp(0.2)` や legacy の `+10^{-4}` といった**論文に無い床は削除済み**（issue #59）。中心一致時の ellphi nudge（`TOPO_CENTER_SEPARATION_MIN`）は **既定オフ**（`reproducibility.allow_topo_center_separation: false`）。opt-in 時のみ topo / ellphi 経路で適用し manifest に記録する。
 
 ### issue #59 検証（早期打ち切り + 診断）
 

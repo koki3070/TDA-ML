@@ -180,6 +180,7 @@ class Trainer:
         self.distance_backend = _topo.get("distance_backend", "mahalanobis")
         self.ellphi_differentiable = _topo.get("ellphi_differentiable", True)
         self.prob_weighting = bool(_topo.get("prob_weighting", True))
+        self.homology_dimensions = _topo.get("homology_dimensions")
         # Filtration-unit alignment for the topology loss (see TopologicalLoss).
         # Legacy knob `training.topo_eps_scale` (v73=0.7022); also accept loss.topo_eps_scale.
         self.topo_eps_scale = float(
@@ -204,7 +205,7 @@ class Trainer:
             )
         )
         logger.info(
-            "Topological distance backend: %s%s (prob_weighting=%s, scale_mode=%s, eps_scale=%s, teacher_mode=%s%s)",
+            "Topological distance backend: %s%s (prob_weighting=%s, homology_dimensions=%s, scale_mode=%s, eps_scale=%s, teacher_mode=%s%s)",
             self.distance_backend,
             (
                 f" (ellphi_differentiable={self.ellphi_differentiable})"
@@ -212,6 +213,7 @@ class Trainer:
                 else ""
             ),
             self.prob_weighting,
+            self.homology_dimensions if self.homology_dimensions is not None else [0, 1],
             self.topo_scale_mode,
             self.topo_eps_scale,
             self.teacher_mode,
@@ -234,9 +236,13 @@ class Trainer:
             eps_scale=self.topo_eps_scale,
             scale_mode=self.topo_scale_mode,
             max_points=self.topo_loss_max_points,
+            homology_dimensions=self.homology_dimensions,
             strict_topo_samples=self._repro["strict_topo_samples"],
+            allow_topo_center_separation=self._repro["allow_topo_center_separation"],
             manifest_ref=self._manifest_ref,
         )
+        self.homology_dimensions = self.topo_loss_fn.homology_dimensions
+        self._manifest_ref["homology_dimensions"] = list(self.homology_dimensions)
         self.size_loss_fn = SizeRegularizationLoss(
             w_major=self.lambda_major,
             w_minor=self.lambda_minor,
@@ -332,7 +338,11 @@ class Trainer:
                 topo_loss = torch.tensor(0.0, device=self.device)
                 if clean_pd_info is not None:
                     topo_loss = self.topo_loss_fn(
-                        data, params, logits, clean_pd_info, clean_scales=clean_scales
+                        data,
+                        params,
+                        logits,
+                        clean_pd_info,
+                        clean_scales=clean_scales,
                     )
 
                 # Regularization Losses (Size and Anisotropy only, as per slides)

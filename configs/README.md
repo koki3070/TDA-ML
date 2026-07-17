@@ -9,8 +9,11 @@ Canonical YAML files live **in this directory** (deep-merged with `base.yaml` by
 | `dev.yaml` | Small MNIST subset for local wiring checks (non-official). |
 | `prod.yaml` | Longer CPU profile (non-official). |
 | `test_fast.yaml` | Small settings for quick checks and CI smoke. |
+| `elongate_n100_no_cls_full120_teacher_local_pca.yaml` | Paper no_cls production (H1-only, local_pca teacher). |
+| `elongate_n100_no_cls_tune_local_pca_ellphi_power_mcc.yaml` | Optuna tune base for power + ellphi (W-Dist / MCC studies). |
+| `elongate_n100_no_cls_full120_baseline.yaml` | no_cls baseline contrast (optional table column). |
 
-**Historical / experiment-specific YAML** is **not** tracked in this public repository. If you maintain an `archive/` directory locally under `configs/`, you can still load it with `load_config("archive/<stem>")`.
+**Probe / ablation / dated experiment YAML** (scaleinv, topo12, raw_axes, H1 launch variants, etc.) belongs under local `configs/archive/` and is **not** part of the publishable surface. Load with `load_config("archive/<stem>")` when present.
 
 ## Keys read by the training stack
 

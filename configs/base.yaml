@@ -29,6 +29,8 @@ model:
     metric_type: "anisotropic" # "anisotropic" or "euclidean"
     distance_backend: "mahalanobis" # or "ellphi"; multiseed driver overrides per run
     ellphi_differentiable: true
+    # Default includes H0+H1; paper no_cls YAML sets [1] (H1-only).
+    homology_dimensions: [0, 1]
   threshold: 0.1
   ellipse_param_dim: 5
   point_dim: 2
@@ -85,3 +87,4 @@ reproducibility:
   allow_skip_degenerate_grid_cells: false
   allow_otsu_threshold_fallback: false
   allow_legacy_loss_keys: false
+  allow_topo_center_separation: false

@@ -21,11 +21,12 @@ N_WORKERS="${1:-4}"
 N_TRIALS="${2:-24}"
 TUNE_EPOCHS="${3:-20}"
 BACKEND="${4:-ellphi}"
-BASE_CONFIG="elongate_n100_no_cls_tune_local_pca_ellphi_power_mcc"
+BASE_CONFIG="${BASE_CONFIG:-elongate_n100_no_cls_tune_local_pca_ellphi_power_mcc}"
 OUT_BASE="${OUT_BASE:-outputs/tune/0709_pwr_wdist}"
-STUDY_NAME="elongate_local_pca_power_wdist_${BACKEND}"
+STUDY_NAME="${STUDY_NAME:-elongate_local_pca_power_wdist_${BACKEND}}"
 STORAGE="sqlite:///${OUT_BASE}/study.db"
-THREADS_PER_WORKER=12
+THREADS_PER_WORKER="${THREADS_PER_WORKER:-12}"
+TRIALS_PER_WORKER="${TRIALS_PER_WORKER:-${N_TRIALS}}"
 
 mkdir -p "${OUT_BASE}"
 cat > "${OUT_BASE}/PURPOSE.md" <<EOF
@@ -50,7 +51,8 @@ for i in $(seq 0 $((N_WORKERS - 1))); do
   OPENBLAS_NUM_THREADS=${THREADS_PER_WORKER} \
   nohup uv run python -u experiments/tune_elongate_wdist.py \
     --base-config "${BASE_CONFIG}" \
-    --n-trials "${N_TRIALS}" \
+    --n-trials "${TRIALS_PER_WORKER}" \
+    --max-complete-trials "${N_TRIALS}" \
     --n-startup-trials 8 \
     --tune-epochs "${TUNE_EPOCHS}" \
     --backend "${BACKEND}" \
@@ -71,6 +73,7 @@ for pid in "${pids[@]}"; do wait "${pid}"; done
 uv run python -u experiments/tune_elongate_wdist.py \
   --base-config "${BASE_CONFIG}" \
   --n-trials "${N_TRIALS}" \
+  --max-complete-trials "${N_TRIALS}" \
   --tune-epochs "${TUNE_EPOCHS}" \
   --backend "${BACKEND}" \
   --size-mode power \

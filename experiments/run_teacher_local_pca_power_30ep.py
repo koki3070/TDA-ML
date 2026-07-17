@@ -30,6 +30,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--epochs", type=int, default=30)
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--base-config", type=str, default=BASE_CONFIG)
     p.add_argument("--size-ref", type=float, default=1.34)
     p.add_argument("--size-power", type=float, default=1.5)
     p.add_argument("--out-base", type=Path, default=None)
@@ -98,13 +99,13 @@ def main() -> int:
 
     if tune_json is not None:
         preflight_tune_production_run(
-            base_config=BASE_CONFIG,
+            base_config=args.base_config,
             tune_json=tune_json,
             project_root=REPO_ROOT,
             out_base=out_base,
         )
 
-    cfg = load_config(BASE_CONFIG, project_root=REPO_ROOT)
+    cfg = load_config(args.base_config, project_root=REPO_ROOT)
     loss_overrides: dict = {
         "size_mode": "power",
         "size_ref": args.size_ref,
@@ -158,6 +159,14 @@ def main() -> int:
         "selection": cfg["training"]["selection"]["metric"],
         "tune_json": tune_source,
         "dbscan_backend": args.dbscan_backend,
+        "aniso_mode": cfg["loss"].get("aniso_mode"),
+        "homology_dimensions": cfg["model"]["topology_loss"].get(
+            "homology_dimensions", [0, 1]
+        ),
+        "protocol_note": (
+            "power 30ep H1-only: raw ellipse params to ellphi; degenerate geometry "
+            "hard-fails; tune weights fixed from seed-42 Optuna"
+        ),
         "reference": tune_source or "recover baseline (~0.76 test MCC, quadratic size)",
     }
     cfg["_manifest_extras"] = {
@@ -173,6 +182,8 @@ def main() -> int:
             "w_topo": purpose["weights"]["w_topo"],
             "w_aniso": purpose["weights"]["w_aniso"],
             "w_size": purpose["weights"]["w_size"],
+            "aniso_mode": purpose.get("aniso_mode"),
+            "homology_dimensions": purpose.get("homology_dimensions"),
         },
     }
 
@@ -201,7 +212,7 @@ def main() -> int:
             "--run-dir",
             str(run_dir),
             "--base-config",
-            BASE_CONFIG,
+            args.base_config,
             "--split",
             split,
             "--backend",

@@ -34,6 +34,7 @@ from tda_ml.checkpoint_io import resolve_val_topo_checkpoint
 from tda_ml.config import deep_update, load_config
 from tda_ml.main import main as train_main
 from tda_ml.preflight import preflight_wdist_tune_study
+from tda_ml.supervised_diagnostics import git_revision
 from tda_ml.topo_wdist import TopoWdistOptions, compute_topo_wdist, topo_wdist_options_from_config
 
 from evaluate_paper_protocol import (  # noqa: E402
@@ -94,7 +95,6 @@ def build_trial_config(
             "w_aniso": float(w_aniso),
             "w_size": float(w_size),
             "w_topo": float(w_topo),
-            "aniso_mode": "elongate",
             "size_mode": size_mode,
             "size_ref": float(size_ref),
             "size_power": float(size_power),
@@ -191,6 +191,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--base-config", type=str, required=True)
     p.add_argument("--n-trials", type=int, default=50)
     p.add_argument(
+        "--max-complete-trials",
+        type=int,
+        default=None,
+        help="Shared-study completion cap; defaults to --n-trials.",
+    )
+    p.add_argument(
         "--n-startup-trials",
         type=int,
         default=12,
@@ -241,10 +247,43 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     Path(args.out_base).mkdir(parents=True, exist_ok=True)
-    preflight_wdist_tune_study(
+    preflight = preflight_wdist_tune_study(
         base_config=args.base_config,
         project_root=REPO_ROOT,
         out_base=args.out_base,
+        config_overrides={
+            "model": {
+                "topology_loss": {
+                    "distance_backend": args.backend,
+                    "prob_weighting": False,
+                }
+            },
+            "loss": {
+                "size_mode": args.size_mode,
+                "size_ref": args.size_ref,
+                "size_power": args.size_power,
+            },
+            "training": {"epochs": args.tune_epochs},
+            "outputs": {"base_dir": args.out_base},
+        },
+    )
+    preflight.update(
+        {
+            "run_status": "pending",
+            "command_entry": "experiments/tune_elongate_wdist.py",
+            "source_revision": git_revision(REPO_ROOT),
+            "study_name": args.study_name,
+            "storage": args.storage,
+            "n_trials": args.n_trials,
+            "max_complete_trials": args.max_complete_trials or args.n_trials,
+            "n_startup_trials": args.n_startup_trials,
+            "sampler_seed": args.seed,
+            "fallbacks": [],
+        }
+    )
+    (Path(args.out_base) / f"WORKER_PREFLIGHT_seed{args.seed}.json").write_text(
+        json.dumps(preflight, indent=2) + "\n",
+        encoding="utf-8",
     )
 
     study = optuna.create_study(
@@ -258,8 +297,9 @@ def main() -> int:
     if not args.write_best:
         callbacks = []
         if args.storage:
+            max_complete = args.max_complete_trials or args.n_trials
             callbacks.append(
-                MaxTrialsCallback(args.n_trials, states=(TrialState.COMPLETE,))
+                MaxTrialsCallback(max_complete, states=(TrialState.COMPLETE,))
             )
         study.optimize(
             make_objective(args),
@@ -287,6 +327,7 @@ def main() -> int:
         "teacher_mode": "local_pca",
         "tune_epochs": args.tune_epochs,
         "n_trials": args.n_trials,
+        "max_complete_trials": args.max_complete_trials or args.n_trials,
         "n_startup_trials": args.n_startup_trials,
         "search_space": {
             "w_aniso": list(w_aniso_range),

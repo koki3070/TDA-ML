@@ -19,19 +19,32 @@ from tda_ml.distance_backend import (
     rescale_distance_matrix,
     subsample_indices,
 )
+from tda_ml.persistence_dimensions import (
+    normalize_homology_dimensions,
+    select_persistence_dimensions,
+)
 from tda_ml.teacher_pd import compute_clean_teacher_batch
 
 
 @dataclass(frozen=True)
 class TopoWdistOptions:
-    teacher_mode: str = "local_pca"
+    # Must match Trainer default unless config overrides it.
+    teacher_mode: str = "euclidean"
     distance_backend: str = "ellphi"
     teacher_local_pca_k: int = 10
     teacher_local_pca_normalize_axes: bool = True
     eps_scale: float = 1.0
     scale_mode: str = "fixed"
     max_points: int | None = None
-    prob_weighting: bool = False
+    prob_weighting: bool = True
+    homology_dimensions: tuple[int, ...] = (0, 1)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "homology_dimensions",
+            normalize_homology_dimensions(self.homology_dimensions),
+        )
 
 
 def topo_wdist_options_from_config(config: dict[str, Any]) -> TopoWdistOptions:
@@ -41,7 +54,7 @@ def topo_wdist_options_from_config(config: dict[str, Any]) -> TopoWdistOptions:
     max_pts = training_cfg.get("topo_loss_max_points", loss_cfg.get("topo_loss_max_points"))
     return TopoWdistOptions(
         teacher_mode=str(
-            loss_cfg.get("teacher_mode", training_cfg.get("teacher_mode", "local_pca"))
+            loss_cfg.get("teacher_mode", training_cfg.get("teacher_mode", "euclidean"))
         ).strip().lower(),
         distance_backend=str(topo_cfg.get("distance_backend", "mahalanobis")).lower().strip(),
         teacher_local_pca_k=int(
@@ -64,6 +77,9 @@ def topo_wdist_options_from_config(config: dict[str, Any]) -> TopoWdistOptions:
         ).strip().lower(),
         max_points=int(max_pts) if max_pts is not None else None,
         prob_weighting=bool(topo_cfg.get("prob_weighting", True)),
+        homology_dimensions=normalize_homology_dimensions(
+            topo_cfg.get("homology_dimensions")
+        ),
     )
 
 
@@ -85,7 +101,7 @@ def compute_topo_wdist(
     options: TopoWdistOptions | None = None,
 ) -> float:
     """
-    Wasserstein-2 distance between H1 PDs (same units as ``TopologicalLoss`` term).
+    Wasserstein-2 distance over configured homology dimensions.
 
     ``points`` / ``params``: full noisy cloud and learned ellipses (DBSCAN unused).
     ``clean_pc``: padded clean inlier coordinates for the teacher PD.
@@ -134,7 +150,13 @@ def compute_topo_wdist(
             clean_scale=clean_scale_i,
         )
         pd_pred = vr(d_mat, treat_as_distances=True)
-        w2_sq = wdist_fn(pd_pred, clean_pd_info[0]) ** 2
+        pd_pred_selected = select_persistence_dimensions(
+            pd_pred, opts.homology_dimensions
+        )
+        clean_pd_selected = select_persistence_dimensions(
+            clean_pd_info[0], opts.homology_dimensions
+        )
+        w2_sq = wdist_fn(pd_pred_selected, clean_pd_selected) ** 2
         value = float(w2_sq.item())
         if not np.isfinite(value):
             raise RuntimeError("non-finite topo W-Dist")

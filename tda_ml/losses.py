@@ -11,6 +11,10 @@ from tda_ml.distance_backend import (
     subsample_indices,
 )
 from tda_ml.numerical_eps import NUMERICAL_EPS
+from tda_ml.persistence_dimensions import (
+    normalize_homology_dimensions,
+    select_persistence_dimensions,
+)
 from tda_ml.reproducibility import record_fallback
 
 logger = logging.getLogger(__name__)
@@ -145,17 +149,16 @@ class MinBRegularizationLoss(nn.Module):
 
 class TopologicalLoss(nn.Module):
     """
-    Computes the Topological Loss between the predicted anisotropic filtration
-    and the clean ground truth persistence diagram using Wasserstein distance.
+    Topological loss: Wasserstein-2 squared between predicted and teacher PDs.
 
-    distance_backend:
-      - ``mahalanobis``: differentiable anisotropic distance
-      - ``ellphi``: tangency distance. With ``ellphi_differentiable=True``,
-        gradients can flow to ellipse parameters via ``ellphi.grad`` (numerical
-        singularities may still produce NaN/zero gradients).
+    ``homology_dimensions`` selects which VR diagrams enter the Wasserstein sum
+    (default ``(0, 1)``). Paper no_cls stack uses ``[1]`` (H1-only).
 
-    ellphi_differentiable:
-      If ``False``, use NumPy ``EllipseCloud.pdist_tangency`` only (no gradients).
+    ``distance_backend``:
+      - ``mahalanobis``: anisotropic distance (optional prob weighting)
+      - ``ellphi``: tangency distance via ``ellphi.grad`` when differentiable
+
+    Degenerate ellphi geometry raises ``RuntimeError`` (no silent axis projection).
     """
     def __init__(
         self,
@@ -166,7 +169,9 @@ class TopologicalLoss(nn.Module):
         eps_scale: float = 1.0,
         scale_mode: str = "fixed",
         max_points: int | None = None,
+        homology_dimensions: tuple[int, ...] | list[int] | None = None,
         strict_topo_samples: bool = True,
+        allow_topo_center_separation: bool = False,
         manifest_ref: dict | None = None,
     ):
         super().__init__()
@@ -183,11 +188,8 @@ class TopologicalLoss(nn.Module):
         # tangency distances live on a different scale than Euclidean, so without this
         # the topology loss is dominated by scale rather than shape.
         #   - scale_mode="fixed":  D <- D * eps_scale  (scalar; eps_scale=1.0 == no-op)
-        #   - scale_mode="median": bring the *prediction* onto the teacher's Euclidean
-        #     scale: D <- D * (m_e / median(offdiag D)), where m_e is the median pairwise
-        #     Euclidean distance of the clean cloud (provided by the trainer as
-        #     ``clean_scales``). The teacher PD is left untouched. If m_e is unavailable,
-        #     fall back to D <- D / median(offdiag D) (per-sample unit median).
+        #   - scale_mode="median": D <- D * (m_e / median(offdiag D)); m_e required
+        #     (missing clean_scale hard-fails; no silent unit-median fallback).
         self.eps_scale = float(eps_scale)
         self.scale_mode = str(scale_mode).strip().lower()
         if self.scale_mode not in ("fixed", "median"):
@@ -198,7 +200,11 @@ class TopologicalLoss(nn.Module):
         self.max_points = int(max_points) if max_points is not None else None
         if self.max_points is not None and self.max_points < 2:
             raise ValueError(f"max_points must be >= 2, got {self.max_points}")
+        self.homology_dimensions = normalize_homology_dimensions(
+            homology_dimensions
+        )
         self.strict_topo_samples = bool(strict_topo_samples)
+        self.allow_topo_center_separation = bool(allow_topo_center_separation)
         self.manifest_ref = manifest_ref
         self.vr_complex = VietorisRipsComplex(dim=1)
         self.wasserstein = WassersteinDistance(q=2)
@@ -247,12 +253,21 @@ class TopologicalLoss(nn.Module):
                 symmetrize="max",
                 backend=self.distance_backend,
                 ellphi_differentiable=self.ellphi_differentiable,
+                allow_topo_center_separation=self.allow_topo_center_separation,
             )
             clean_scale_i = clean_scales[i] if clean_scales is not None else None
             d_mat = self._rescale_distance_matrix(d_batch[0], clean_scale=clean_scale_i)
             try:
                 pd_pred_info = self.vr_complex(d_mat, treat_as_distances=True)
-                loss_sample = self.wasserstein(pd_pred_info, clean_pd_info[i]) ** 2
+                pd_pred_selected = select_persistence_dimensions(
+                    pd_pred_info, self.homology_dimensions
+                )
+                clean_pd_selected = select_persistence_dimensions(
+                    clean_pd_info[i], self.homology_dimensions
+                )
+                loss_sample = (
+                    self.wasserstein(pd_pred_selected, clean_pd_selected) ** 2
+                )
 
                 if torch.isnan(loss_sample):
                     msg = f"nan or inf Wasserstein loss at batch_index={i}"

@@ -31,6 +31,23 @@ class TestTuneTrialConfig(unittest.TestCase):
         self.assertEqual(cfg["model"]["topology_loss"]["distance_backend"], "ellphi")
         self.assertFalse(cfg["model"]["topology_loss"]["prob_weighting"])
 
+    def test_h1_tune_preserves_declared_regularizer_stack(self):
+        cfg = build_trial_config(
+            "elongate_n100_no_cls_tune_local_pca_ellphi_power_h1",
+            w_aniso=0.1,
+            w_size=0.2,
+            w_topo=0.3,
+            lr=1e-4,
+            backend="ellphi",
+            tune_epochs=20,
+            out_base="outputs/test_tune_h1",
+            trial_number=0,
+            size_mode="power",
+        )
+        self.assertEqual(cfg["model"]["topology_loss"]["homology_dimensions"], [1])
+        self.assertEqual(cfg["loss"]["aniso_mode"], "elongate")
+        self.assertEqual(cfg["loss"]["size_mode"], "power")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -47,6 +47,7 @@ class TestReproducibilityConfig(unittest.TestCase):
         self.assertFalse(settings["allow_nan_batch_skip"])
         self.assertFalse(settings["allow_empty_cloud_fallback"])
         self.assertFalse(settings["allow_legacy_loss_keys"])
+        self.assertFalse(settings["allow_topo_center_separation"])
 
     def test_resolve_dbscan_grid_explicit_override(self):
         from tda_ml.config import load_config
@@ -76,6 +77,8 @@ class TestReproducibilityConfig(unittest.TestCase):
             classify_tune_objective("val_topo_wdist_min"),
             "wdist",
         )
+        with self.assertRaises(ValueError):
+            classify_tune_objective("custom_objective_with_wdist_substring")
 
     def test_selection_default_is_val_topo(self):
         from tda_ml.model_selection import selection_settings_from_config

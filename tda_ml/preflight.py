@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any, Literal
 
-from tda_ml.config import load_config
+from tda_ml.config import deep_update, load_config
 from tda_ml.reproducibility import (
     RUN_STATUS_NOT_RUN,
     assert_ellphi_differentiable_available,
@@ -41,7 +41,7 @@ def classify_tune_objective(
     *,
     objective_kind: str | None = None,
 ) -> TuneObjectiveKind:
-    """Resolve tune objective kind from explicit field, whitelist, or substring fallback."""
+    """Resolve tune objective kind from explicit field or whitelist (no substring guess)."""
     if objective_kind is not None:
         kind = str(objective_kind).lower().strip()
         if kind in ("mcc", "wdist"):
@@ -57,13 +57,9 @@ def classify_tune_objective(
     if lower in _KNOWN_TUNE_OBJECTIVES:
         return _KNOWN_TUNE_OBJECTIVES[lower]
 
-    if "wdist" in lower:
-        return "wdist"
-    if "mcc" in lower:
-        return "mcc"
     raise ValueError(
         f"Unrecognized tune objective {objective!r}; set objective_kind in tune JSON "
-        "or use a name containing 'mcc' or 'wdist'."
+        f"or use a whitelist name: {sorted(_KNOWN_TUNE_OBJECTIVES)}."
     )
 
 
@@ -113,6 +109,7 @@ def preflight_training_config(
         "config_id": config.get("meta", {}).get("config_id"),
         "distance_backend": backend,
         "distance_backend_impl": impl,
+        "homology_dimensions": list(topo.get("homology_dimensions", [0, 1])),
         "seed": config.get("data", {}).get("seed"),
         "ellphi_repo": build_ellphi_repo_manifest_fields(root),
     }
@@ -155,9 +152,12 @@ def preflight_tune_study(
     project_root: Path | str,
     out_base: Path | str,
     study_objective: TuneObjectiveKind,
+    config_overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     root = Path(project_root)
     cfg = load_config(base_config, project_root=root)
+    if config_overrides:
+        cfg = deep_update(cfg, config_overrides)
     dbscan_grid_from_config(cfg)
     preview = preflight_training_config(cfg, project_root=root)
     out = Path(out_base)
@@ -167,6 +167,7 @@ def preflight_tune_study(
     preview["out_base"] = str(out)
     preview["base_config"] = base_config
     preview["study_objective"] = study_objective
+    preview["config_overrides"] = config_overrides or {}
     write_json(out / "STUDY_PREFLIGHT.json", preview)
     return preview
 
@@ -190,12 +191,14 @@ def preflight_wdist_tune_study(
     base_config: str,
     project_root: Path | str,
     out_base: Path | str,
+    config_overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return preflight_tune_study(
         base_config=base_config,
         project_root=project_root,
         out_base=out_base,
         study_objective="wdist",
+        config_overrides=config_overrides,
     )
 
 
