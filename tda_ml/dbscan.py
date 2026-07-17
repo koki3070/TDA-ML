@@ -21,7 +21,8 @@ def compute_anisotropic_distance_matrix_np(
             With inlier probability ``p_in,i = clamp(1 - prob_i, min=1e-4)``, squared
             distances are divided by ``p_in,i * p_in,j`` before symmetrization and
             square root, i.e. distances scale like ``1 / sqrt(p_in,i * p_in,j)``.
-        backend (str): ``mahalanobis`` or ``ellphi`` (probs are ignored for ellphi)
+        backend (str): ``mahalanobis`` or ``ellphi``. Supplying ``probs`` with
+            ``ellphi`` hard-fails because probability weighting is not implemented.
 
     Returns:
         np.ndarray: (N, N) distance matrix.
@@ -32,6 +33,11 @@ def compute_anisotropic_distance_matrix_np(
 
     if b == "ellphi" and points_t.ndim != 2:
         raise ValueError("backend='ellphi' requires points with shape (N, 2).")
+    if b == "ellphi" and probs is not None:
+        raise RuntimeError(
+            "backend='ellphi' does not implement probability weighting; "
+            "pass probs=None or use mahalanobis."
+        )
 
     if points_t.ndim == 2:
         pts_np = points_t.numpy()

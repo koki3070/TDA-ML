@@ -31,7 +31,7 @@
 | Gudhi `persistence.compute_w_distance` | H1-only | Euclidean Alpha / 点座標 | legacy baseline 用。主表の ellipse W-Dist とは別物 |
 | `metrics` の W-Dist | 上記どちらかを明示引数で選択 | 引数不足は **hard-fail**（黙って 0 にしない） | |
 
-Trainer と `TopoWdistOptions` の欠落時既定はどちらも `teacher_mode=euclidean` / `prob_weighting=true`。主表 YAML が `local_pca` と `prob_weighting=false` を明示する。
+主表・チューニングの preflight は `homology_dimensions=[1]`、`teacher_mode=local_pca`、`prob_weighting=false`、`aniso_mode=elongate` の明示を要求する。欠落や不一致は実行前に hard-fail する。
 
 ## 環境
 
@@ -135,10 +135,10 @@ uv run python experiments/run_backend_multiseed.py \
 ### バックエンド比較と outlier 確率の重み（非対称）
 
 - `run_backend_multiseed.py` のマルチシード・バックエンド比較は、**距離バックエンドだけを切り替えた純粋な ablation ではありません**（学習パイプライン全体の比較です）。
-- 位相損失では **`mahalanobis`** が outlier **確率による重み付け**を距離行列に織り込める一方、**`ellphi`** では **未実装**で `probs` は使われません。
+- 位相損失では **`mahalanobis`** が outlier **確率による重み付け**を距離行列に織り込める一方、**`ellphi`** では未実装のため `prob_weighting=false` を明示する。`true` は黙って無視せず hard-fail する。
 - 結果は **同一スケジュール・同一設定表面**（典型: `configs/reproduce.yaml`）上の **2 本のフルパイプライン**として読み、距離実装だけの効果に還元しないでください。
 
-位相損失用の距離行列は `model.topology_loss.distance_backend` ごとに別定義です。**`mahalanobis`** では、学習で予測した **outlier 確率 `probs`** を距離の重み付けに織り込めます（`tda_ml.topology.compute_anisotropic_distance_matrix`）。**`ellphi`** では楕円の接触距離のみを用い、**確率に基づく重み付けは未実装のため `probs` は使われません**（初回のみ `UserWarning` が出ます。実装は `tda_ml.distance_backend.compute_distance_matrix_batch`）。
+位相損失用の距離行列は `model.topology_loss.distance_backend` ごとに別定義です。**`mahalanobis`** では、学習で予測した **outlier 確率 `probs`** を距離の重み付けに織り込めます（`tda_ml.topology.compute_anisotropic_distance_matrix`）。**`ellphi`** では楕円の接触距離のみを用い、`run_backend_multiseed.py` が `prob_weighting=false` を明示します。未実装の確率重みを要求すると `tda_ml.distance_backend.compute_distance_matrix_batch` が hard-fail します。
 
 したがって、`run_backend_multiseed.py` で同じ YAML を回しても、**位相損失が見ている距離空間はバックエンド間で同一ではありません**。ここでは「同一のデータ・スケジュール・設定表面での再現パイプライン比較」を意図しており、**両バックエンドが数学的に完全に同型の重み付き距離目的関数を共有する**という読み方はしません。`ellphi` 側に Mahalanobis の確率重みに相当する項を無理に足す予定はなく、比較の解釈は本節および `README.md` の英語節（*Backend comparison: outlier-probability weighting*）に従ってください。
 
@@ -149,6 +149,8 @@ no_cls・local_pca 教師・`size_mode=power` スタックでは、`run_tune_loc
 要点: **学習 topo loss と教師 PD は ellphi**；**MCC のチューニング objective と paper eval の DBSCAN は mahalanobis**（filtration 時刻をクラスタリング距離に使わない）。
 
 **重み固定プロトコル（重要）:** ハイパーパラメータ探索（Optuna）は **seed 42 の 20ep proxy で 1 回だけ**行い、得られた best 重み（`w_topo` / `w_aniso` / `w_size` / `lr`）を **5 つのデータ seed（42/123/456/789/1024）すべての 30ep 本番に固定**して適用します。**データ seed ごとの再チューニングは行いません。** 論文の mean ± std はこの固定重みの下でのデータ seed 間ばらつきです。
+
+**H1-only 移行:** `homology_dimensions=[1]` 導入前に生成した tune JSON（旧 `0709_*` など）は目的関数が異なるため再利用しません。新しい best JSON は H1-only 契約（homology、teacher、probability weighting、anisotropy mode）を記録し、本番 preflight は契約キーの欠落・不一致を hard-fail します。H1-only スタックで二目的を再チューニングした後、その重みで 30ep 本番を再学習してください。
 
 ## 教師あり学習の目的関数（論文 Methods 用）
 
@@ -194,23 +196,6 @@ $\mathcal{L}_{\mathrm{aniso}} = \frac{10}{N}\sum_i \mathrm{ReLU}(R_i-\tau)^2$。
 $1/\bigl((1-p_i)(1-p_j)\bigr)$ で重み付け（`INLIER_PROB_MIN` で下限クリップ）。
 
 **数値安定化のみの定数**（モデリング床ではない）は `tda_ml/numerical_eps.py` に集約し、付録で列挙します。encoder の `clamp(0.2)` や legacy の `+10^{-4}` といった**論文に無い床は削除済み**（issue #59）。中心一致を含む ellphi 退化は補正せず hard-fail します。
-
-### issue #59 検証（早期打ち切り + 診断）
-
-床削除後の教師あり本線を確認するには:
-
-```bash
-uv run python experiments/issue59_verify_mahalanobis.py
-```
-
-- 設定: `configs/issue59_verify_mahalanobis.yaml`（`reproduce_1week_tuned` 相当・**mahalanobis**）
-- **`probe_epochs` 後**（`configs/issue59_verify_mahalanobis.yaml` では既定 8）も `val_mcc` / `train_mcc` が閾値（0.05 / 0.02）を超えない、または全 outlier 予測（`val_recall≈1`）なら **学習を打ち切り**
-- 打ち切り時の成果物（`<run_dir>/logs/`）:
-  - `issue59_abort_report.json` / `.md` — 楕円軸・encoder PCA・距離行列・分類の統計と**原因仮説リスト**
-  - `abort_checkpoint.pth` — 打ち切り時点の重み
-  - `run_manifest.json` — コミット SHA・early_abort 設定
-
-CLI: `--epochs 12 --seed 42 --out-base outputs/issue59_verify`
 
 ## 図・定性出力
 

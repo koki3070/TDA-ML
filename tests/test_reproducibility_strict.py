@@ -69,6 +69,12 @@ class TestReproducibilityConfig(unittest.TestCase):
         )
         self.assertEqual(classify_tune_objective("val_dbscan_mcc_max"), "mcc")
         self.assertEqual(
+            classify_tune_objective(
+                "val_dbscan_mcc_max_at_val_topo_best_ckpt"
+            ),
+            "mcc",
+        )
+        self.assertEqual(
             classify_tune_objective("legacy_name", objective_kind="mcc"),
             "mcc",
         )
@@ -100,6 +106,53 @@ class TestPreflightTuneJson(unittest.TestCase):
             payload = preflight_tune_json(path)
             self.assertEqual(payload["_objective_kind"], "wdist")
 
+    def test_legacy_tune_json_without_paper_contract_raises(self):
+        from tda_ml.preflight import (
+            PAPER_NO_CLS_CONTRACT,
+            preflight_tune_json,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "best.json"
+            path.write_text(
+                '{"objective":"val_topo_wdist_min","objective_kind":"wdist",'
+                '"best_params":{"w_topo":0.1,"w_aniso":0.1,"w_size":0.1,"lr":1e-4}}\n',
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "Re-tune with the H1-only stack"):
+                preflight_tune_json(
+                    path,
+                    expected_contract=PAPER_NO_CLS_CONTRACT,
+                )
+
+    def test_tune_json_paper_contract_must_match(self):
+        import json
+
+        from tda_ml.preflight import (
+            PAPER_NO_CLS_CONTRACT,
+            preflight_tune_json,
+        )
+
+        payload = {
+            "objective": "val_dbscan_mcc_max_at_val_topo_best_ckpt",
+            "objective_kind": "mcc",
+            "best_params": {
+                "w_topo": 0.1,
+                "w_aniso": 0.1,
+                "w_size": 0.1,
+                "lr": 1e-4,
+            },
+            **PAPER_NO_CLS_CONTRACT,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "best.json"
+            path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+            loaded = preflight_tune_json(
+                path,
+                expected_contract=PAPER_NO_CLS_CONTRACT,
+            )
+            self.assertEqual(loaded["_objective_kind"], "mcc")
+
     def test_explicit_objective_kind_overrides_name(self):
         from tda_ml.preflight import preflight_tune_json
 
@@ -112,6 +165,50 @@ class TestPreflightTuneJson(unittest.TestCase):
             )
             payload = preflight_tune_json(path)
             self.assertEqual(payload["_objective_kind"], "wdist")
+
+
+class TestPaperNoClsContract(unittest.TestCase):
+    @staticmethod
+    def _valid_config() -> dict:
+        return {
+            "model": {
+                "topology_loss": {
+                    "homology_dimensions": [1],
+                    "prob_weighting": False,
+                }
+            },
+            "loss": {
+                "teacher_mode": "local_pca",
+                "aniso_mode": "elongate",
+            },
+        }
+
+    def test_explicit_contract_passes(self):
+        from tda_ml.preflight import (
+            PAPER_NO_CLS_CONTRACT,
+            assert_paper_no_cls_contract,
+        )
+
+        self.assertEqual(
+            assert_paper_no_cls_contract(self._valid_config()),
+            PAPER_NO_CLS_CONTRACT,
+        )
+
+    def test_missing_homology_dimensions_raises(self):
+        from tda_ml.preflight import assert_paper_no_cls_contract
+
+        config = self._valid_config()
+        del config["model"]["topology_loss"]["homology_dimensions"]
+        with self.assertRaisesRegex(ValueError, "homology_dimensions"):
+            assert_paper_no_cls_contract(config)
+
+    def test_wrong_teacher_mode_raises(self):
+        from tda_ml.preflight import assert_paper_no_cls_contract
+
+        config = self._valid_config()
+        config["loss"]["teacher_mode"] = "euclidean"
+        with self.assertRaisesRegex(ValueError, "contract mismatch"):
+            assert_paper_no_cls_contract(config)
 
 
 class TestResolveValTopoCheckpoint(unittest.TestCase):

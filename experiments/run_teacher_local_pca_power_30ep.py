@@ -15,6 +15,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from tda_ml.config import deep_update, load_config  # noqa: E402
 from tda_ml.main import main as train_main  # noqa: E402
 from tda_ml.preflight import (  # noqa: E402
+    assert_paper_no_cls_contract,
     classify_tune_objective,
     preflight_tune_production_run,
 )
@@ -86,15 +87,18 @@ def infer_tag(tune_json: Path | None, explicit: str | None) -> str:
 
 def main() -> int:
     args = parse_args()
+    cfg = load_config(args.base_config, project_root=REPO_ROOT)
+    paper_contract = assert_paper_no_cls_contract(cfg)
     tune_json = args.tune_json
     tag = infer_tag(tune_json, args.tag)
     out_base = args.out_base
     if out_base is None:
-        out_base = (
-            REPO_ROOT / "outputs/supervised/pwr30_mcc"
-            if tune_json is not None
-            else DEFAULT_OUT
-        )
+        if tune_json is None:
+            out_base = DEFAULT_OUT
+        elif tag == TAG_WDIST:
+            out_base = REPO_ROOT / "outputs/supervised/pwr30_wdist"
+        else:
+            out_base = REPO_ROOT / "outputs/supervised/pwr30_mcc"
     out_base.mkdir(parents=True, exist_ok=True)
 
     if tune_json is not None:
@@ -103,9 +107,24 @@ def main() -> int:
             tune_json=tune_json,
             project_root=REPO_ROOT,
             out_base=out_base,
+            config_overrides={
+                "loss": {
+                    "size_mode": "power",
+                    "size_ref": args.size_ref,
+                    "size_power": args.size_power,
+                },
+                "training": {"epochs": args.epochs},
+                "data": {"seed": args.seed},
+                "model": {
+                    "topology_loss": {
+                        "distance_backend": "ellphi",
+                        "prob_weighting": False,
+                    }
+                },
+                "outputs": {"base_dir": str(out_base)},
+            },
         )
 
-    cfg = load_config(args.base_config, project_root=REPO_ROOT)
     loss_overrides: dict = {
         "size_mode": "power",
         "size_ref": args.size_ref,
@@ -160,9 +179,8 @@ def main() -> int:
         "tune_json": tune_source,
         "dbscan_backend": args.dbscan_backend,
         "aniso_mode": cfg["loss"].get("aniso_mode"),
-        "homology_dimensions": cfg["model"]["topology_loss"].get(
-            "homology_dimensions", [0, 1]
-        ),
+        "homology_dimensions": cfg["model"]["topology_loss"]["homology_dimensions"],
+        "paper_no_cls_contract": paper_contract,
         "protocol_note": (
             "power 30ep H1-only: raw ellipse params to ellphi; degenerate geometry "
             "hard-fails; tune weights fixed from seed-42 Optuna"

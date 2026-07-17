@@ -317,6 +317,7 @@ def main() -> int:
     )
     payload = {
         "objective": "val_topo_wdist_min_at_val_topo_best_ckpt",
+        "objective_kind": "wdist",
         "checkpoint_policy": CHECKPOINT_POLICY,
         "save_every": SAVE_EVERY,
         "base_config": args.base_config,
@@ -325,11 +326,11 @@ def main() -> int:
         "size_ref_default": args.size_ref,
         "size_power_default": args.size_power,
         "narrow_search": bool(args.narrow_search),
-        "teacher_mode": "local_pca",
         "tune_epochs": args.tune_epochs,
         "n_trials": args.n_trials,
         "max_complete_trials": args.max_complete_trials or args.n_trials,
         "n_startup_trials": args.n_startup_trials,
+        **preflight["paper_no_cls_contract"],
         "search_space": {
             "w_aniso": list(w_aniso_range),
             "w_size": list(w_size_range),

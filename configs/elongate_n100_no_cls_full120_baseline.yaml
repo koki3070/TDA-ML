@@ -13,6 +13,7 @@ model:
     distance_backend: "mahalanobis"
     ellphi_differentiable: true
     prob_weighting: false
+    homology_dimensions: [1]
 
 loss:
   w_class: 0.0
@@ -21,6 +22,7 @@ loss:
   w_size: 0.488
   pos_weight: 1.0
   aniso_mode: "elongate"
+  teacher_mode: euclidean
 
 training:
   lr: 0.000158

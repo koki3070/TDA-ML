@@ -25,8 +25,56 @@ _KNOWN_TUNE_OBJECTIVES: dict[str, TuneObjectiveKind] = {
     "val_topo_wdist_min": "wdist",
     "val_topo_wdist_min_at_val_topo_best_ckpt": "wdist",
     "val_dbscan_mcc_max": "mcc",
+    "val_dbscan_mcc_max_at_val_topo_best_ckpt": "mcc",
     "val_dbscan_mcc": "mcc",
 }
+
+PAPER_NO_CLS_CONTRACT: dict[str, Any] = {
+    "homology_dimensions": [1],
+    "teacher_mode": "local_pca",
+    "prob_weighting": False,
+    "aniso_mode": "elongate",
+}
+
+
+def assert_paper_no_cls_contract(config: dict[str, Any]) -> dict[str, Any]:
+    """Require the declared H1-only paper method; never infer missing fields."""
+    topo = (config.get("model") or {}).get("topology_loss") or {}
+    loss = config.get("loss") or {}
+    actual: dict[str, Any] = {}
+
+    if "homology_dimensions" not in topo:
+        raise ValueError(
+            "Paper no_cls config must explicitly define "
+            "model.topology_loss.homology_dimensions=[1]"
+        )
+    actual["homology_dimensions"] = list(topo["homology_dimensions"])
+
+    if "teacher_mode" not in loss:
+        raise ValueError(
+            "Paper no_cls config must explicitly define loss.teacher_mode='local_pca'"
+        )
+    actual["teacher_mode"] = str(loss["teacher_mode"]).strip().lower()
+
+    if "prob_weighting" not in topo:
+        raise ValueError(
+            "Paper no_cls config must explicitly define "
+            "model.topology_loss.prob_weighting=false"
+        )
+    actual["prob_weighting"] = bool(topo["prob_weighting"])
+
+    if "aniso_mode" not in loss:
+        raise ValueError(
+            "Paper no_cls config must explicitly define loss.aniso_mode='elongate'"
+        )
+    actual["aniso_mode"] = str(loss["aniso_mode"]).strip().lower()
+
+    if actual != PAPER_NO_CLS_CONTRACT:
+        raise ValueError(
+            "Paper no_cls contract mismatch: "
+            f"expected={PAPER_NO_CLS_CONTRACT}, actual={actual}"
+        )
+    return actual
 
 
 def _require_import(name: str, import_fn) -> None:
@@ -122,6 +170,7 @@ def preflight_tune_json(
     tune_json: Path,
     *,
     expected: TuneObjectiveKind | None = None,
+    expected_contract: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not tune_json.is_file():
         raise FileNotFoundError(f"Tune JSON not found: {tune_json}")
@@ -142,6 +191,19 @@ def preflight_tune_json(
             f"Tune JSON objective {payload['objective']!r} is {kind!r}, expected {expected!r}: "
             f"{tune_json}"
         )
+    if expected_contract is not None:
+        missing = [key for key in expected_contract if key not in payload]
+        if missing:
+            raise ValueError(
+                f"Tune JSON predates the declared paper contract; missing {missing}: "
+                f"{tune_json}. Re-tune with the H1-only stack."
+            )
+        actual_contract = {key: payload[key] for key in expected_contract}
+        if actual_contract != expected_contract:
+            raise ValueError(
+                "Tune JSON paper contract does not match the production config: "
+                f"expected={expected_contract}, actual={actual_contract}: {tune_json}"
+            )
     payload["_objective_kind"] = kind
     return payload
 
@@ -158,6 +220,7 @@ def preflight_tune_study(
     cfg = load_config(base_config, project_root=root)
     if config_overrides:
         cfg = deep_update(cfg, config_overrides)
+    contract = assert_paper_no_cls_contract(cfg)
     dbscan_grid_from_config(cfg)
     preview = preflight_training_config(cfg, project_root=root)
     out = Path(out_base)
@@ -167,6 +230,7 @@ def preflight_tune_study(
     preview["out_base"] = str(out)
     preview["base_config"] = base_config
     preview["study_objective"] = study_objective
+    preview["paper_no_cls_contract"] = contract
     preview["config_overrides"] = config_overrides or {}
     write_json(out / "STUDY_PREFLIGHT.json", preview)
     return preview
@@ -177,12 +241,14 @@ def preflight_mcc_tune_study(
     base_config: str,
     project_root: Path | str,
     out_base: Path | str,
+    config_overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return preflight_tune_study(
         base_config=base_config,
         project_root=project_root,
         out_base=out_base,
         study_objective="mcc",
+        config_overrides=config_overrides,
     )
 
 
@@ -208,14 +274,36 @@ def preflight_tune_production_run(
     tune_json: Path,
     project_root: Path | str,
     out_base: Path | str,
+    config_overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     root = Path(project_root)
-    tune_payload = preflight_tune_json(tune_json)
     cfg = load_config(base_config, project_root=root)
+    if config_overrides:
+        cfg = deep_update(cfg, config_overrides)
+    contract = assert_paper_no_cls_contract(cfg)
+    tune_payload = preflight_tune_json(
+        tune_json,
+        expected_contract=contract,
+    )
+    tune_params = tune_payload["best_params"]
+    cfg = deep_update(
+        cfg,
+        {
+            "loss": {
+                "w_topo": float(tune_params["w_topo"]),
+                "w_aniso": float(tune_params["w_aniso"]),
+                "w_size": float(tune_params["w_size"]),
+            },
+            "training": {"lr": float(tune_params["lr"])},
+        },
+    )
     preview = preflight_training_config(cfg, project_root=root)
     preview["tune_json"] = str(tune_json.resolve())
     preview["tune_objective"] = tune_payload.get("objective")
     preview["tune_objective_kind"] = tune_payload["_objective_kind"]
+    preview["tune_best_params"] = tune_params
+    preview["paper_no_cls_contract"] = contract
+    preview["config_overrides"] = config_overrides or {}
     preview["checkpoint_selection"] = (
         (cfg.get("training") or {}).get("selection") or {}
     ).get("metric", "val_topo")

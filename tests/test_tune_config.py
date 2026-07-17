@@ -13,6 +13,14 @@ from tune_elongate_wdist import build_trial_config  # noqa: E402
 
 
 class TestTuneTrialConfig(unittest.TestCase):
+    def test_baseline_declares_topology_contract(self):
+        from tda_ml.config import load_config
+
+        cfg = load_config("elongate_n100_no_cls_full120_baseline")
+        self.assertEqual(cfg["model"]["topology_loss"]["homology_dimensions"], [1])
+        self.assertFalse(cfg["model"]["topology_loss"]["prob_weighting"])
+        self.assertEqual(cfg["loss"]["teacher_mode"], "euclidean")
+
     def test_canonical_power_tune_base(self):
         cfg = build_trial_config(
             "elongate_n100_no_cls_tune_local_pca_ellphi_power_mcc",

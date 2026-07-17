@@ -3,9 +3,11 @@
 import unittest
 import torch
 
+from tda_ml.dbscan import compute_anisotropic_distance_matrix_np
 from tda_ml.distance_backend import (
     DISTANCE_MODE_ELLPHI,
     DISTANCE_MODE_MAHALANOBIS,
+    compute_distance_matrix_batch,
     compute_topo_distance_matrix,
     mahalanobis_distance_matrix_batched,
     normalize_topo_distance_mode,
@@ -16,6 +18,31 @@ class TestTopoDistanceMode(unittest.TestCase):
     def test_normalize_aliases(self):
         self.assertEqual(normalize_topo_distance_mode("Mahalanobis"), DISTANCE_MODE_MAHALANOBIS)
         self.assertEqual(normalize_topo_distance_mode("ellphi"), DISTANCE_MODE_ELLPHI)
+
+    def test_ellphi_probability_weighting_hard_fails(self):
+        points = torch.zeros(1, 3, 2)
+        params = torch.ones(1, 3, 3)
+        probs = torch.full((1, 3), 0.5)
+        with self.assertRaisesRegex(RuntimeError, "does not implement probability weighting"):
+            compute_distance_matrix_batch(
+                points,
+                params,
+                probs=probs,
+                symmetrize="max",
+                backend="ellphi",
+            )
+
+    def test_ellphi_dbscan_probability_weighting_hard_fails(self):
+        points = torch.zeros(3, 2)
+        params = torch.ones(3, 3)
+        probs = torch.full((3,), 0.5)
+        with self.assertRaisesRegex(RuntimeError, "does not implement probability weighting"):
+            compute_anisotropic_distance_matrix_np(
+                points,
+                params,
+                probs=probs,
+                backend="ellphi",
+            )
 
     def test_mahalanobis_shape(self):
         torch.manual_seed(0)

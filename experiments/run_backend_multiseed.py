@@ -267,6 +267,9 @@ def run_one(
             "topology_loss": {
                 "distance_backend": backend,
                 "ellphi_differentiable": ellphi_diff,
+                # ellphi is geometry-only and rejects unsupported probability
+                # weighting instead of silently ignoring it.
+                "prob_weighting": backend != "ellphi",
             }
         },
         "outputs": {"base_dir": out_base},

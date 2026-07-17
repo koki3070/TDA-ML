@@ -8,8 +8,6 @@ The differentiable ellphi path connects ``ellphi.grad`` functions
 
 from __future__ import annotations
 
-import warnings
-
 import numpy as np
 import torch
 
@@ -31,8 +29,6 @@ try:
     from scipy.spatial.distance import squareform
 except ImportError:
     squareform = None  # type: ignore[misc, assignment]
-
-_ELLPHI_PROB_WARNED = False
 
 DISTANCE_MODE_MAHALANOBIS = "mahalanobis"
 DISTANCE_MODE_ELLPHI = "ellphi"
@@ -131,7 +127,8 @@ def compute_distance_matrix_batch(
         ``ellphi.grad`` is available, gradients flow to centers/covariances.
         Missing grad API is a hard-fail (no NumPy fallback).
 
-    For ``ellphi``, ``probs``-based weighting is currently unsupported and ignored.
+    For ``ellphi``, requesting ``probs``-based weighting hard-fails because that
+    method is not implemented.
     """
     b = backend.lower().strip()
     if b not in ("mahalanobis", "ellphi"):
@@ -142,14 +139,12 @@ def compute_distance_matrix_batch(
             points, params, probs=probs, symmetrize=symmetrize
         )
 
-    global _ELLPHI_PROB_WARNED
-    if probs is not None and not _ELLPHI_PROB_WARNED:
-        warnings.warn(
-            "distance_backend='ellphi' ignores outlier-probability weighting because it is not implemented yet.",
-            UserWarning,
-            stacklevel=2,
+    if probs is not None:
+        raise RuntimeError(
+            "distance_backend='ellphi' does not implement probability weighting; "
+            "set model.topology_loss.prob_weighting=false or use mahalanobis. "
+            "Refusing to ignore the requested method."
         )
-        _ELLPHI_PROB_WARNED = True
 
     use_torch = ellphi_differentiable and _has_ellphi_grad_api()
     if ellphi_differentiable and not use_torch:

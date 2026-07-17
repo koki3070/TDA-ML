@@ -39,6 +39,7 @@ from tda_ml.dbscan_eval import evaluate_model_grid
 from tda_ml.main import main as train_main
 from tda_ml.preflight import preflight_mcc_tune_study
 from tda_ml.reproducibility import reproducibility_settings, write_json
+from tda_ml.supervised_diagnostics import git_revision
 from tda_ml.topo_wdist import topo_wdist_options_from_config
 
 from evaluate_paper_protocol import (  # noqa: E402
@@ -201,6 +202,12 @@ def parse_args() -> argparse.Namespace:
         default="elongate_n100_no_cls_tune_local_pca_ellphi_power_mcc",
     )
     p.add_argument("--n-trials", type=int, default=24)
+    p.add_argument(
+        "--max-complete-trials",
+        type=int,
+        default=None,
+        help="Shared-study completion cap; defaults to --n-trials.",
+    )
     p.add_argument("--n-startup-trials", type=int, default=8)
     p.add_argument("--tune-epochs", type=int, default=20)
     p.add_argument(
@@ -238,10 +245,44 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     Path(args.out_base).mkdir(parents=True, exist_ok=True)
-    preflight_mcc_tune_study(
+    preflight = preflight_mcc_tune_study(
         base_config=args.base_config,
         project_root=REPO_ROOT,
         out_base=args.out_base,
+        config_overrides={
+            "model": {
+                "topology_loss": {
+                    "distance_backend": args.backend,
+                    "prob_weighting": False,
+                }
+            },
+            "loss": {
+                "aniso_mode": "elongate",
+                "size_mode": args.size_mode,
+                "size_ref": args.size_ref,
+                "size_power": args.size_power,
+            },
+            "training": {"epochs": args.tune_epochs},
+            "outputs": {"base_dir": args.out_base},
+        },
+    )
+    preflight.update(
+        {
+            "run_status": "pending",
+            "command_entry": "experiments/tune_elongate_mcc.py",
+            "source_revision": git_revision(REPO_ROOT),
+            "study_name": args.study_name,
+            "storage": args.storage,
+            "n_trials": args.n_trials,
+            "max_complete_trials": args.max_complete_trials or args.n_trials,
+            "n_startup_trials": args.n_startup_trials,
+            "sampler_seed": args.seed,
+            "fallbacks": [],
+        }
+    )
+    write_json(
+        Path(args.out_base) / f"WORKER_PREFLIGHT_seed{args.seed}.json",
+        preflight,
     )
 
     study = optuna.create_study(
@@ -255,7 +296,10 @@ def main() -> int:
     if not args.write_best:
         callbacks = []
         if args.storage:
-            callbacks.append(MaxTrialsCallback(args.n_trials, states=(TrialState.COMPLETE,)))
+            max_complete = args.max_complete_trials or args.n_trials
+            callbacks.append(
+                MaxTrialsCallback(max_complete, states=(TrialState.COMPLETE,))
+            )
         study.optimize(
             make_objective(args),
             n_trials=args.n_trials,
@@ -268,19 +312,21 @@ def main() -> int:
     best = study.best_trial
     payload = {
         "objective": "val_dbscan_mcc_max_at_val_topo_best_ckpt",
+        "objective_kind": "mcc",
         "checkpoint_policy": CHECKPOINT_POLICY,
         "checkpoint_selection": "val_topo",
         "save_every": SAVE_EVERY,
         "base_config": args.base_config,
         "backend": args.backend,
         "dbscan_backend": args.dbscan_backend,
-        "teacher_mode": "local_pca",
         "size_mode": args.size_mode,
         "size_ref_default": args.size_ref,
         "size_power_default": args.size_power,
         "tune_size_hyperparams": bool(args.tune_size_hyperparams),
         "tune_epochs": args.tune_epochs,
         "n_trials": args.n_trials,
+        "max_complete_trials": args.max_complete_trials or args.n_trials,
+        **preflight["paper_no_cls_contract"],
         "search_space": {
             "w_aniso": list(W_ANISO_RANGE),
             "w_size": list(W_SIZE_RANGE),
