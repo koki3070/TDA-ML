@@ -44,10 +44,17 @@ class TestTrainer(unittest.TestCase):
                 'w_topo': 0.1,
                 'w_aniso': 0.01,
                 'w_size': 0.1,
+                'teacher_mode': 'euclidean',
+                'aniso_mode': 'linear',
+                'size_mode': 'quadratic',
+                'size_ref': 1.34,
+                'size_power': 1.5,
             },
             'model': {
                 'topology_loss': {
                     'distance_backend': 'mahalanobis',
+                    'homology_dimensions': [0, 1],
+                    'prob_weighting': True,
                 }
             },
             'outputs': {
@@ -96,6 +103,11 @@ class TestTrainer(unittest.TestCase):
             "w_topo": 0.1,
             "w_aniso": 0.01,
             "w_size": 0.1,
+            "teacher_mode": "euclidean",
+            "aniso_mode": "linear",
+            "size_mode": "quadratic",
+            "size_ref": 1.34,
+            "size_power": 1.5,
         }
         self.config["model"]["topology_loss"]["prob_weighting"] = False
         trainer = Trainer(self.model, self.config, self.device)

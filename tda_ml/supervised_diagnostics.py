@@ -17,9 +17,10 @@ from tda_ml.topology import compute_anisotropic_metric
 
 
 def git_revision(repo_root: Path | None = None) -> str:
+    """Return HEAD SHA, with ``-dirty`` when the worktree has local changes."""
     root = repo_root or Path(__file__).resolve().parents[1]
     try:
-        return (
+        head = (
             subprocess.check_output(
                 ["git", "rev-parse", "HEAD"],
                 cwd=root,
@@ -28,6 +29,15 @@ def git_revision(repo_root: Path | None = None) -> str:
             )
             .strip()
         )
+        porcelain = subprocess.check_output(
+            ["git", "status", "--porcelain"],
+            cwd=root,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        if porcelain.strip():
+            return f"{head}-dirty"
+        return head
     except (subprocess.CalledProcessError, FileNotFoundError):
         return "unknown"
 

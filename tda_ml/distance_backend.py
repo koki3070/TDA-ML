@@ -8,8 +8,6 @@ The differentiable ellphi path connects ``ellphi.grad`` functions
 
 from __future__ import annotations
 
-import warnings
-
 import numpy as np
 import torch
 
@@ -31,8 +29,6 @@ try:
     from scipy.spatial.distance import squareform
 except ImportError:
     squareform = None  # type: ignore[misc, assignment]
-
-_ELLPHI_PROB_WARNED = False
 
 DISTANCE_MODE_MAHALANOBIS = "mahalanobis"
 DISTANCE_MODE_ELLPHI = "ellphi"
@@ -58,18 +54,22 @@ def rescale_distance_matrix(
 
     ``clean_scale`` (m_e) is the median pairwise Euclidean distance of the teacher
     cloud for this sample. In ``median`` mode the prediction is scaled so its median
-    matches m_e, i.e. it is brought onto the (untouched) teacher's Euclidean scale;
-    without m_e it falls back to a per-sample unit median. Any other ``scale_mode``
-    applies the fixed scalar ``eps_scale`` (1.0 == no-op).
+    matches m_e. ``clean_scale`` is required (missing scale hard-fails). Any other
+    ``scale_mode`` applies the fixed scalar ``eps_scale`` (1.0 == no-op).
     """
     if scale_mode == "median":
+        if clean_scale is None:
+            raise RuntimeError(
+                "scale_mode='median' requires clean_scale (teacher median Euclidean); "
+                "refusing silent unit-median fallback."
+            )
         off = d_mat[d_mat > 0]
         if off.numel() == 0:
-            return d_mat
+            raise RuntimeError(
+                "scale_mode='median' found no positive off-diagonal distances."
+            )
         denom = torch.median(off).detach() + NUMERICAL_EPS
-        if clean_scale is not None:
-            return d_mat * (float(clean_scale) / denom)
-        return d_mat / denom
+        return d_mat * (float(clean_scale) / denom)
     if eps_scale != 1.0:
         return d_mat * eps_scale
     return d_mat
@@ -124,10 +124,11 @@ def compute_distance_matrix_batch(
     backend:
       - ``mahalanobis``: ``compute_anisotropic_distance_matrix`` (differentiable)
       - ``ellphi``: tangency distance. If ``ellphi_differentiable=True`` and
-        ``ellphi.grad`` is available, gradients flow to centers/covariances
-        (therefore to ellipse parameters).
+        ``ellphi.grad`` is available, gradients flow to centers/covariances.
+        Missing grad API is a hard-fail (no NumPy fallback).
 
-    For ``ellphi``, ``probs``-based weighting is currently unsupported and ignored.
+    For ``ellphi``, requesting ``probs``-based weighting hard-fails because that
+    method is not implemented.
     """
     b = backend.lower().strip()
     if b not in ("mahalanobis", "ellphi"):
@@ -138,14 +139,12 @@ def compute_distance_matrix_batch(
             points, params, probs=probs, symmetrize=symmetrize
         )
 
-    global _ELLPHI_PROB_WARNED
-    if probs is not None and not _ELLPHI_PROB_WARNED:
-        warnings.warn(
-            "distance_backend='ellphi' ignores outlier-probability weighting because it is not implemented yet.",
-            UserWarning,
-            stacklevel=2,
+    if probs is not None:
+        raise RuntimeError(
+            "distance_backend='ellphi' does not implement probability weighting; "
+            "set model.topology_loss.prob_weighting=false or use mahalanobis. "
+            "Refusing to ignore the requested method."
         )
-        _ELLPHI_PROB_WARNED = True
 
     use_torch = ellphi_differentiable and _has_ellphi_grad_api()
     if ellphi_differentiable and not use_torch:
@@ -188,8 +187,7 @@ def compute_topo_distance_matrix(
     Shared topology-loss entrypoint: map batched points/ellipse params to ``(B,N,N)`` distances.
 
     ``distance_mode`` is ``mahalanobis`` or ``ellphi``.
-    When ``ellphi_backend='auto'``, a differentiable ellphi path is preferred and
-    falls back to NumPy when unavailable.
+    Differentiable ellphi requires ``ellphi.grad``; otherwise hard-fail.
     """
     backend = normalize_topo_distance_mode(distance_mode)
     eb = str(ellphi_backend).strip().lower()

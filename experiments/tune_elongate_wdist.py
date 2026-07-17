@@ -9,12 +9,13 @@ Each trial:
 2. Loads ``best_model.pth`` (val_topo selection checkpoint; hard-fail if missing).
 3. Objective = mean val **topo W-Dist** (learned ellipses vs local_pca teacher PD).
 
-Base config ``elongate_n100_no_cls_tune_local_pca`` sets ``teacher_mode: local_pca``,
+Base config ``elongate_n100_no_cls_tune_local_pca_ellphi_power_mcc`` sets
+``teacher_mode: local_pca``, H1-only persistence, and ``size_mode: power``.
 ``w_class: 0``, ``selection.metric: val_topo``.
 
 Usage (parallel, recommended)::
 
-    bash experiments/run_tune_local_pca_parallel.sh 8 50 20 ellphi
+    bash experiments/run_tune_local_pca_power_wdist_parallel.sh 8 50 20 ellphi
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ from tda_ml.checkpoint_io import resolve_val_topo_checkpoint
 from tda_ml.config import deep_update, load_config
 from tda_ml.main import main as train_main
 from tda_ml.preflight import preflight_wdist_tune_study
+from tda_ml.supervised_diagnostics import git_revision
 from tda_ml.topo_wdist import TopoWdistOptions, compute_topo_wdist, topo_wdist_options_from_config
 
 from evaluate_paper_protocol import (  # noqa: E402
@@ -83,7 +85,7 @@ def build_trial_config(
     tune_epochs: int,
     out_base: str,
     trial_number: int,
-    size_mode: str = "quadratic",
+    size_mode: str = "power",
     size_ref: float = 1.34,
     size_power: float = 1.5,
 ) -> dict[str, Any]:
@@ -94,6 +96,7 @@ def build_trial_config(
             "w_aniso": float(w_aniso),
             "w_size": float(w_size),
             "w_topo": float(w_topo),
+            # Mirror paper contract / STUDY_PREFLIGHT overrides onto every trial.
             "aniso_mode": "elongate",
             "size_mode": size_mode,
             "size_ref": float(size_ref),
@@ -109,6 +112,7 @@ def build_trial_config(
             "topology_loss": {
                 "distance_backend": backend,
                 "prob_weighting": False,
+                "homology_dimensions": [1],
             }
         },
         "outputs": {"base_dir": out_base, "save_every": SAVE_EVERY},
@@ -191,6 +195,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--base-config", type=str, required=True)
     p.add_argument("--n-trials", type=int, default=50)
     p.add_argument(
+        "--max-complete-trials",
+        type=int,
+        default=None,
+        help="Shared-study completion cap; defaults to --n-trials.",
+    )
+    p.add_argument(
         "--n-startup-trials",
         type=int,
         default=12,
@@ -204,10 +214,10 @@ def parse_args() -> argparse.Namespace:
         choices=["mahalanobis", "ellphi"],
         help="Training topo-loss backend (ellphi = ellipse tangency filtration).",
     )
-    p.add_argument("--out-base", type=str, default="outputs/tune/0629_elongate")
+    p.add_argument("--out-base", type=str, default="outputs/tune/pwr_wdist")
     p.add_argument(
         "--size-mode",
-        default="quadratic",
+        default="power",
         choices=["quadratic", "power", "softplus", "barrier"],
     )
     p.add_argument("--size-ref", type=float, default=1.34)
@@ -241,10 +251,45 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     Path(args.out_base).mkdir(parents=True, exist_ok=True)
-    preflight_wdist_tune_study(
+    preflight = preflight_wdist_tune_study(
         base_config=args.base_config,
         project_root=REPO_ROOT,
         out_base=args.out_base,
+        config_overrides={
+            "model": {
+                "topology_loss": {
+                    "distance_backend": args.backend,
+                    "prob_weighting": False,
+                    "homology_dimensions": [1],
+                }
+            },
+            "loss": {
+                "aniso_mode": "elongate",
+                "size_mode": args.size_mode,
+                "size_ref": args.size_ref,
+                "size_power": args.size_power,
+            },
+            "training": {"epochs": args.tune_epochs},
+            "outputs": {"base_dir": args.out_base},
+        },
+    )
+    preflight.update(
+        {
+            "run_status": "pending",
+            "command_entry": "experiments/tune_elongate_wdist.py",
+            "source_revision": git_revision(REPO_ROOT),
+            "study_name": args.study_name,
+            "storage": args.storage,
+            "n_trials": args.n_trials,
+            "max_complete_trials": args.max_complete_trials or args.n_trials,
+            "n_startup_trials": args.n_startup_trials,
+            "sampler_seed": args.seed,
+            "fallbacks": [],
+        }
+    )
+    (Path(args.out_base) / f"WORKER_PREFLIGHT_seed{args.seed}.json").write_text(
+        json.dumps(preflight, indent=2) + "\n",
+        encoding="utf-8",
     )
 
     study = optuna.create_study(
@@ -258,8 +303,9 @@ def main() -> int:
     if not args.write_best:
         callbacks = []
         if args.storage:
+            max_complete = args.max_complete_trials or args.n_trials
             callbacks.append(
-                MaxTrialsCallback(args.n_trials, states=(TrialState.COMPLETE,))
+                MaxTrialsCallback(max_complete, states=(TrialState.COMPLETE,))
             )
         study.optimize(
             make_objective(args),
@@ -276,6 +322,7 @@ def main() -> int:
     )
     payload = {
         "objective": "val_topo_wdist_min_at_val_topo_best_ckpt",
+        "objective_kind": "wdist",
         "checkpoint_policy": CHECKPOINT_POLICY,
         "save_every": SAVE_EVERY,
         "base_config": args.base_config,
@@ -284,10 +331,15 @@ def main() -> int:
         "size_ref_default": args.size_ref,
         "size_power_default": args.size_power,
         "narrow_search": bool(args.narrow_search),
-        "teacher_mode": "local_pca",
         "tune_epochs": args.tune_epochs,
         "n_trials": args.n_trials,
+        "max_complete_trials": args.max_complete_trials or args.n_trials,
         "n_startup_trials": args.n_startup_trials,
+        "source_revision": git_revision(REPO_ROOT),
+        "study_name": args.study_name,
+        "storage": args.storage,
+        "sampler_seed": args.seed,
+        **preflight["paper_no_cls_contract"],
         "search_space": {
             "w_aniso": list(w_aniso_range),
             "w_size": list(w_size_range),

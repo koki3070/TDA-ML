@@ -30,15 +30,31 @@ class TestRunPaths(unittest.TestCase):
         self.assertEqual(resolve_run_slug(cfg), "custom")
 
     def test_build_run_dir(self) -> None:
-        when = datetime.datetime(2026, 7, 9, 13, 5)
+        when = datetime.datetime(2026, 7, 9, 13, 5, 0)
         cfg = {
             "meta": {"config_id": "tune_mcc_t010", "run_slug": "t010"},
             "outputs": {"base_dir": "outputs/tune/0709_pwr_mcc"},
         }
         run_dir, slug, stamp = build_run_dir(cfg, when=when)
         self.assertEqual(slug, "t010")
-        self.assertEqual(stamp, "0709_1305")
-        self.assertEqual(run_dir, "outputs/tune/0709_pwr_mcc/t010_0709_1305")
+        self.assertEqual(stamp, "0709_130500")
+        self.assertEqual(run_dir, "outputs/tune/0709_pwr_mcc/t010_0709_130500")
+
+    def test_build_run_dir_refuses_existing(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        when = datetime.datetime(2026, 7, 9, 13, 5, 1)
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp) / "out"
+            existing = base / "t010_0709_130501"
+            existing.mkdir(parents=True)
+            cfg = {
+                "meta": {"run_slug": "t010"},
+                "outputs": {"base_dir": str(base)},
+            }
+            with self.assertRaises(FileExistsError):
+                build_run_dir(cfg, when=when)
 
     def test_experiment_base(self) -> None:
         when = datetime.datetime(2026, 7, 9, 13, 5)

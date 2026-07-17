@@ -75,7 +75,24 @@ def main(config_name=None, config=None, trial=None, config_overrides=None):
         logger.info("Project structure created at: %s", run_dir)
 
         data_cfg = config["data"]
-        seed = data_cfg.get("seed", 42)
+        if "seed" not in data_cfg:
+            raise ValueError("data.seed must be set explicitly; refusing silent seed=42")
+        seed = int(data_cfg["seed"])
+        topo_cfg = (config.get("model") or {}).get("topology_loss") or {}
+        if "distance_backend" not in topo_cfg:
+            raise ValueError(
+                "model.topology_loss.distance_backend must be set before manifest write; "
+                "refusing silent mahalanobis default"
+            )
+        selection = (config.get("training", {}).get("selection") or {})
+        if "metric" not in selection:
+            raise ValueError(
+                "training.selection.metric must be set explicitly; "
+                "refusing silent val_topo default in run manifest"
+            )
+        init_checkpoint = config.get("init_checkpoint")
+        if init_checkpoint and not os.path.exists(init_checkpoint):
+            raise FileNotFoundError(f"Initial checkpoint not found: {init_checkpoint}")
         manifest = {
             "timestamp_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "source_revision": git_revision(),
@@ -85,12 +102,8 @@ def main(config_name=None, config=None, trial=None, config_overrides=None):
             "command_entry": "tda_ml.main",
             "seed": seed,
             "epochs_planned": config["training"]["epochs"],
-            "distance_backend": config.get("model", {})
-            .get("topology_loss", {})
-            .get("distance_backend", "mahalanobis"),
-            "checkpoint_selection": (config.get("training", {}).get("selection") or {}).get(
-                "metric", "val_topo"
-            ),
+            "distance_backend": str(topo_cfg["distance_backend"]).lower().strip(),
+            "checkpoint_selection": selection["metric"],
             "early_abort": config.get("training", {}).get("early_abort"),
             "run_dir": run_dir,
             "run_status": "pending",
@@ -128,74 +141,91 @@ def main(config_name=None, config=None, trial=None, config_overrides=None):
     else:
         preflight_training_config(config, project_root=default_project_root())
         data_cfg = config["data"]
-        seed = data_cfg.get("seed", 42)
+        if "seed" not in data_cfg:
+            raise ValueError("data.seed must be set explicitly; refusing silent seed=42")
+        seed = int(data_cfg["seed"])
         manifest = {"config_id": config_id, "seed": seed}
         config.setdefault("_manifest", manifest)
 
-    data_cfg = config["data"]
-    seed = data_cfg.get("seed", 42)
-    deterministic_algorithms = bool(config.get("reproducibility", {}).get("deterministic_algorithms", False))
-    set_global_seed(seed, deterministic_algorithms=deterministic_algorithms)
-    logger.info(
-        "Global seed initialized: seed=%s, deterministic_algorithms=%s",
-        seed,
-        deterministic_algorithms,
-    )
-    loader_settings = resolve_dataloader_settings(config, device)
-    configure_torch_runtime(config, device)
-    logger.info(
-        "DataLoader settings: workers=%s, pin_memory=%s, persistent_workers=%s, prefetch_factor=%s",
-        loader_settings.num_workers,
-        loader_settings.pin_memory,
-        loader_settings.persistent_workers,
-        loader_settings.prefetch_factor,
-    )
-
-    data_loader, val_loader, test_loader = build_dataloaders(config, seed, loader_settings)
-
-    model = AnisotropicOutlierClassifier(**model_kwargs_from_config(config))
-    model.to(device)
-
-    trainer = Trainer(model, config, device=device) 
-
-    init_checkpoint = config.get('init_checkpoint')
-    if init_checkpoint:
-        if not os.path.exists(init_checkpoint):
-            raise FileNotFoundError(f"Initial checkpoint not found: {init_checkpoint}")
-        logger.info("Loading initial weights from %s", init_checkpoint)
-        checkpoint = load_torch_checkpoint(init_checkpoint, map_location=device)
-        model.load_state_dict(extract_model_state_dict(checkpoint), strict=False)
-
-    log_dir = config["outputs"]["log_dir"]
-    metrics_path = os.path.join(log_dir, "metrics.csv")
-    runtime_profile = build_runtime_profile(
-        config=config,
-        device=device,
-        num_workers=loader_settings.num_workers,
-        pin_memory=loader_settings.pin_memory,
-        persistent_workers=loader_settings.persistent_workers,
-        prefetch_factor=loader_settings.prefetch_factor,
-        use_amp_effective=trainer.use_amp,
-        amp_dtype_effective=str(trainer.amp_dtype).replace("torch.", ""),
-    )
-    runtime_profile_path = os.path.join(log_dir, "runtime_profile.json")
-    with open(runtime_profile_path, "w", encoding="utf-8") as f:
-        json.dump(runtime_profile, f, ensure_ascii=True, indent=2)
-    logger.info("Runtime profile saved: %s", runtime_profile_path)
-
-    if manifest_path is not None:
-        impl = config.get("_manifest", {}).get("distance_backend_impl")
-        if impl is not None:
-            manifest["distance_backend_impl"] = impl
-        manifest["final_status"] = "running"
-        manifest["run_status"] = RUN_STATUS_RUNNING
-        if config.get("_manifest", {}).get("fallbacks"):
-            manifest["fallbacks"] = config["_manifest"]["fallbacks"]
-            manifest["fallback_status"] = config["_manifest"].get(
-                "fallback_status", "recorded"
-            )
+    def _mark_failed(exc: BaseException) -> None:
+        if manifest_path is None:
+            return
+        manifest["final_status"] = RUN_STATUS_FAILED
+        manifest["run_status"] = RUN_STATUS_FAILED
+        manifest["error"] = str(exc)
         with open(manifest_path, "w", encoding="utf-8") as f:
             json.dump(manifest, f, ensure_ascii=True, indent=2)
+
+    try:
+        data_cfg = config["data"]
+        seed = int(data_cfg["seed"])
+        deterministic_algorithms = bool(
+            config.get("reproducibility", {}).get("deterministic_algorithms", False)
+        )
+        set_global_seed(seed, deterministic_algorithms=deterministic_algorithms)
+        logger.info(
+            "Global seed initialized: seed=%s, deterministic_algorithms=%s",
+            seed,
+            deterministic_algorithms,
+        )
+        loader_settings = resolve_dataloader_settings(config, device)
+        configure_torch_runtime(config, device)
+        logger.info(
+            "DataLoader settings: workers=%s, pin_memory=%s, persistent_workers=%s, prefetch_factor=%s",
+            loader_settings.num_workers,
+            loader_settings.pin_memory,
+            loader_settings.persistent_workers,
+            loader_settings.prefetch_factor,
+        )
+
+        data_loader, val_loader, test_loader = build_dataloaders(
+            config, seed, loader_settings
+        )
+
+        model = AnisotropicOutlierClassifier(**model_kwargs_from_config(config))
+        model.to(device)
+
+        trainer = Trainer(model, config, device=device)
+
+        init_checkpoint = config.get("init_checkpoint")
+        if init_checkpoint:
+            logger.info("Loading initial weights from %s", init_checkpoint)
+            checkpoint = load_torch_checkpoint(init_checkpoint, map_location=device)
+            model.load_state_dict(extract_model_state_dict(checkpoint), strict=False)
+
+        log_dir = config["outputs"]["log_dir"]
+        metrics_path = os.path.join(log_dir, "metrics.csv")
+        runtime_profile = build_runtime_profile(
+            config=config,
+            device=device,
+            num_workers=loader_settings.num_workers,
+            pin_memory=loader_settings.pin_memory,
+            persistent_workers=loader_settings.persistent_workers,
+            prefetch_factor=loader_settings.prefetch_factor,
+            use_amp_effective=trainer.use_amp,
+            amp_dtype_effective=str(trainer.amp_dtype).replace("torch.", ""),
+        )
+        runtime_profile_path = os.path.join(log_dir, "runtime_profile.json")
+        with open(runtime_profile_path, "w", encoding="utf-8") as f:
+            json.dump(runtime_profile, f, ensure_ascii=True, indent=2)
+        logger.info("Runtime profile saved: %s", runtime_profile_path)
+
+        if manifest_path is not None:
+            impl = config.get("_manifest", {}).get("distance_backend_impl")
+            if impl is not None:
+                manifest["distance_backend_impl"] = impl
+            manifest["final_status"] = "running"
+            manifest["run_status"] = RUN_STATUS_RUNNING
+            if config.get("_manifest", {}).get("fallbacks"):
+                manifest["fallbacks"] = config["_manifest"]["fallbacks"]
+                manifest["fallback_status"] = config["_manifest"].get(
+                    "fallback_status", "recorded"
+                )
+            with open(manifest_path, "w", encoding="utf-8") as f:
+                json.dump(manifest, f, ensure_ascii=True, indent=2)
+    except Exception as exc:
+        _mark_failed(exc)
+        raise
 
     with open(metrics_path, "w", newline="") as f:
         writer = csv.writer(f)

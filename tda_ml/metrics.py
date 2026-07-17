@@ -50,10 +50,20 @@ def compute_recall_specificity_gmean_mcc_wdist(
     recall, specificity, gmean, mcc = compute_recall_specificity_gmean_mcc(
         labels_gt, labels_pred
     )
-    w_dist = 0.0
     if points is not None and params is not None and clean_pc is not None:
+        if topo_options is None:
+            raise ValueError(
+                "topo_options is required for ellipse-filtration topo W-Dist; "
+                "refusing silent TopoWdistOptions defaults"
+            )
         w_dist = float(compute_topo_wdist(points, params, clean_pc, topo_options))
     elif points is not None and gt_inliers is not None:
         pred_inliers = points[np.asarray(labels_pred) == 0]
         w_dist = float(compute_w_distance(pred_inliers, gt_inliers))
+    else:
+        raise ValueError(
+            "W-Dist requires either (points, params, clean_pc) for ellipse-filtration "
+            "topo W-Dist, or (points, gt_inliers) for legacy Euclidean Alpha W-Dist; "
+            "refusing silent zero."
+        )
     return recall, specificity, gmean, mcc, w_dist

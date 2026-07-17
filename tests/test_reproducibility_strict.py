@@ -69,13 +69,31 @@ class TestReproducibilityConfig(unittest.TestCase):
         )
         self.assertEqual(classify_tune_objective("val_dbscan_mcc_max"), "mcc")
         self.assertEqual(
-            classify_tune_objective("legacy_name", objective_kind="mcc"),
+            classify_tune_objective(
+                "val_dbscan_mcc_max_at_val_topo_best_ckpt"
+            ),
+            "mcc",
+        )
+        self.assertEqual(
+            classify_tune_objective(
+                "val_dbscan_mcc_max",
+                objective_kind="mcc",
+            ),
             "mcc",
         )
         self.assertEqual(
             classify_tune_objective("val_topo_wdist_min"),
             "wdist",
         )
+        with self.assertRaises(ValueError):
+            classify_tune_objective("custom_objective_with_wdist_substring")
+        with self.assertRaises(ValueError):
+            classify_tune_objective("legacy_name", objective_kind="mcc")
+        with self.assertRaisesRegex(ValueError, "conflicts"):
+            classify_tune_objective(
+                "val_topo_wdist_min",
+                objective_kind="mcc",
+            )
 
     def test_selection_default_is_val_topo(self):
         from tda_ml.model_selection import selection_settings_from_config
@@ -98,7 +116,54 @@ class TestPreflightTuneJson(unittest.TestCase):
             payload = preflight_tune_json(path)
             self.assertEqual(payload["_objective_kind"], "wdist")
 
-    def test_explicit_objective_kind_overrides_name(self):
+    def test_legacy_tune_json_without_paper_contract_raises(self):
+        from tda_ml.preflight import (
+            PAPER_NO_CLS_CONTRACT,
+            preflight_tune_json,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "best.json"
+            path.write_text(
+                '{"objective":"val_topo_wdist_min","objective_kind":"wdist",'
+                '"best_params":{"w_topo":0.1,"w_aniso":0.1,"w_size":0.1,"lr":1e-4}}\n',
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "Re-tune with the H1-only stack"):
+                preflight_tune_json(
+                    path,
+                    expected_contract=PAPER_NO_CLS_CONTRACT,
+                )
+
+    def test_tune_json_paper_contract_must_match(self):
+        import json
+
+        from tda_ml.preflight import (
+            PAPER_NO_CLS_CONTRACT,
+            preflight_tune_json,
+        )
+
+        payload = {
+            "objective": "val_dbscan_mcc_max_at_val_topo_best_ckpt",
+            "objective_kind": "mcc",
+            "best_params": {
+                "w_topo": 0.1,
+                "w_aniso": 0.1,
+                "w_size": 0.1,
+                "lr": 1e-4,
+            },
+            **PAPER_NO_CLS_CONTRACT,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "best.json"
+            path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+            loaded = preflight_tune_json(
+                path,
+                expected_contract=PAPER_NO_CLS_CONTRACT,
+            )
+            self.assertEqual(loaded["_objective_kind"], "mcc")
+
+    def test_objective_kind_must_agree_with_whitelist_name(self):
         from tda_ml.preflight import preflight_tune_json
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -108,8 +173,57 @@ class TestPreflightTuneJson(unittest.TestCase):
                 '"best_params":{"w_topo":0.1,"w_aniso":0.1,"w_size":0.1,"lr":1e-4}}\n',
                 encoding="utf-8",
             )
-            payload = preflight_tune_json(path)
-            self.assertEqual(payload["_objective_kind"], "wdist")
+            with self.assertRaisesRegex(ValueError, "Unrecognized tune objective"):
+                preflight_tune_json(path)
+
+
+class TestPaperNoClsContract(unittest.TestCase):
+    @staticmethod
+    def _valid_config() -> dict:
+        return {
+            "model": {
+                "topology_loss": {
+                    "homology_dimensions": [1],
+                    "prob_weighting": False,
+                    "distance_backend": "ellphi",
+                }
+            },
+            "loss": {
+                "teacher_mode": "local_pca",
+                "aniso_mode": "elongate",
+                "size_mode": "power",
+                "w_class": 0.0,
+                "teacher_local_pca_k": 10,
+                "teacher_local_pca_normalize_axes": True,
+            },
+        }
+
+    def test_explicit_contract_passes(self):
+        from tda_ml.preflight import (
+            PAPER_NO_CLS_CONTRACT,
+            assert_paper_no_cls_contract,
+        )
+
+        self.assertEqual(
+            assert_paper_no_cls_contract(self._valid_config()),
+            PAPER_NO_CLS_CONTRACT,
+        )
+
+    def test_missing_homology_dimensions_raises(self):
+        from tda_ml.preflight import assert_paper_no_cls_contract
+
+        config = self._valid_config()
+        del config["model"]["topology_loss"]["homology_dimensions"]
+        with self.assertRaisesRegex(ValueError, "homology_dimensions"):
+            assert_paper_no_cls_contract(config)
+
+    def test_wrong_teacher_mode_raises(self):
+        from tda_ml.preflight import assert_paper_no_cls_contract
+
+        config = self._valid_config()
+        config["loss"]["teacher_mode"] = "euclidean"
+        with self.assertRaisesRegex(ValueError, "contract mismatch"):
+            assert_paper_no_cls_contract(config)
 
 
 class TestResolveValTopoCheckpoint(unittest.TestCase):
@@ -137,7 +251,12 @@ class TestDbscanGridStrict(unittest.TestCase):
 
     def test_failed_cell_raises_when_skip_not_allowed(self):
         cloud = self._toy_cloud()
-        opts = TopoWdistOptions(teacher_mode="euclidean", distance_backend="mahalanobis")
+        opts = TopoWdistOptions(
+            teacher_mode="euclidean",
+            distance_backend="mahalanobis",
+            homology_dimensions=(0, 1),
+            prob_weighting=False,
+        )
         with patch(
             "tda_ml.dbscan_eval._dbscan_classification_metrics",
             side_effect=RuntimeError("degenerate"),
@@ -171,6 +290,7 @@ class TestTopologicalLossStrict(unittest.TestCase):
             weight=1.0,
             distance_backend="mahalanobis",
             prob_weighting=False,
+            homology_dimensions=[0, 1],
             strict_topo_samples=True,
         )
 

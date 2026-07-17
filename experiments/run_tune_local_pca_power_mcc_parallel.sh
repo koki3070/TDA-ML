@@ -12,7 +12,7 @@
 #
 # Detached:
 #   bash experiments/launch_detached_screen.sh tune_power_mcc_maha \
-#     outputs/tune/0709_pwr_mcc_maha/launcher.log \
+#     outputs/tune/pwr_mcc_maha/launcher.log \
 #     experiments/run_tune_local_pca_power_mcc_parallel.sh 4 24 20 ellphi mahalanobis
 
 set -euo pipefail
@@ -25,11 +25,12 @@ N_TRIALS="${2:-24}"
 TUNE_EPOCHS="${3:-20}"
 BACKEND="${4:-ellphi}"
 DBSCAN_BACKEND="${5:-mahalanobis}"
-BASE_CONFIG="elongate_n100_no_cls_tune_local_pca_ellphi_power_mcc"
-OUT_BASE="${OUT_BASE:-outputs/tune/0709_pwr_mcc_dbscan_${DBSCAN_BACKEND}}"
-STUDY_NAME="elongate_local_pca_power_mcc_${BACKEND}_dbscan_${DBSCAN_BACKEND}"
+BASE_CONFIG="${BASE_CONFIG:-elongate_n100_no_cls_tune_local_pca_ellphi_power_mcc}"
+OUT_BASE="${OUT_BASE:-outputs/tune/pwr_mcc_dbscan_${DBSCAN_BACKEND}}"
+STUDY_NAME="${STUDY_NAME:-elongate_local_pca_power_mcc_${BACKEND}_dbscan_${DBSCAN_BACKEND}}"
 STORAGE="sqlite:///${OUT_BASE}/study.db"
-THREADS_PER_WORKER=12
+THREADS_PER_WORKER="${THREADS_PER_WORKER:-12}"
+TRIALS_PER_WORKER="${TRIALS_PER_WORKER:-${N_TRIALS}}"
 
 mkdir -p "${OUT_BASE}"
 cat > "${OUT_BASE}/PURPOSE.md" <<EOF
@@ -56,7 +57,8 @@ for i in $(seq 0 $((N_WORKERS - 1))); do
   OPENBLAS_NUM_THREADS=${THREADS_PER_WORKER} \
   nohup uv run python -u experiments/tune_elongate_mcc.py \
     --base-config "${BASE_CONFIG}" \
-    --n-trials "${N_TRIALS}" \
+    --n-trials "${TRIALS_PER_WORKER}" \
+    --max-complete-trials "${N_TRIALS}" \
     --n-startup-trials 8 \
     --tune-epochs "${TUNE_EPOCHS}" \
     --backend "${BACKEND}" \
@@ -77,6 +79,7 @@ for pid in "${pids[@]}"; do wait "${pid}"; done
 uv run python -u experiments/tune_elongate_mcc.py \
   --base-config "${BASE_CONFIG}" \
   --n-trials "${N_TRIALS}" \
+  --max-complete-trials "${N_TRIALS}" \
   --tune-epochs "${TUNE_EPOCHS}" \
   --backend "${BACKEND}" \
   --dbscan-backend "${DBSCAN_BACKEND}" \

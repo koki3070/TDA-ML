@@ -23,6 +23,8 @@ class TestTopoWdist(unittest.TestCase):
         opts = TopoWdistOptions(
             teacher_mode="local_pca",
             distance_backend="mahalanobis",
+            homology_dimensions=(0, 1),
+            prob_weighting=False,
         )
         w = compute_topo_wdist(noisy, params, clean, opts)
         self.assertTrue(np.isfinite(w))
@@ -37,6 +39,8 @@ class TestTopoWdist(unittest.TestCase):
         opts = TopoWdistOptions(
             teacher_mode="local_pca",
             distance_backend="mahalanobis",
+            homology_dimensions=(0, 1),
+            prob_weighting=False,
         )
         w_same = compute_topo_wdist(clean, params[: clean.shape[0]], clean, opts)
         w_diff = compute_topo_wdist(noisy, params, clean, opts)

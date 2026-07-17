@@ -9,8 +9,11 @@ Canonical YAML files live **in this directory** (deep-merged with `base.yaml` by
 | `dev.yaml` | Small MNIST subset for local wiring checks (non-official). |
 | `prod.yaml` | Longer CPU profile (non-official). |
 | `test_fast.yaml` | Small settings for quick checks and CI smoke. |
+| `elongate_n100_no_cls_full120_teacher_local_pca.yaml` | Paper no_cls production (H1-only, local_pca teacher). |
+| `elongate_n100_no_cls_tune_local_pca_ellphi_power_mcc.yaml` | Optuna tune base for power + ellphi (W-Dist / MCC studies). |
+| `elongate_n100_no_cls_full120_baseline.yaml` | H1-only no_cls contrast with Euclidean teacher (optional table column). |
 
-**Historical / experiment-specific YAML** is **not** tracked in this public repository. If you maintain an `archive/` directory locally under `configs/`, you can still load it with `load_config("archive/<stem>")`.
+**Probe / ablation / dated experiment YAML** (scaleinv, topo12, raw_axes, H1 launch variants, etc.) belongs under local `configs/archive/` and is **not** part of the publishable surface. Load with `load_config("archive/<stem>")` when present.
 
 ## Keys read by the training stack
 
@@ -21,11 +24,13 @@ Canonical YAML files live **in this directory** (deep-merged with `base.yaml` by
 | `meta` | `config_id` | `main` | Run directory prefix `<config_id>_<timestamp>`. |
 | `model` | `point_dim`, `feature_dim` | `main` | Passed to `AnisotropicOutlierClassifier`. |
 | `model` | `threshold` | `Trainer` | Classification threshold. |
-| `model` | `topology_loss.distance_backend` | `Trainer` | `mahalanobis` or `ellphi` (set by multiseed driver per run). |
+| `model` | `topology_loss.distance_backend` | `Trainer` | `mahalanobis` or `ellphi` (explicit; no silent default). |
+| `model` | `topology_loss.homology_dimensions` | `Trainer` / topo W-Dist | Explicit list (e.g. `[0,1]` or paper `[1]`). |
+| `model` | `topology_loss.prob_weighting` | `Trainer` | Explicit bool; `ellphi` requires `false`. |
 | `model` | `topology_loss.ellphi_differentiable` | `Trainer` | Default `true`; multiseed driver reads from merged config. |
-| `loss` | `w_class`, `w_topo`, `w_aniso` | `Trainer` | Loss weights (fallback: `training.lambda_*`). |
-| `loss` | `w_size` | `Trainer` | Size regularization scale (fallback: `training.lambda_size` / `lambda_major` / `lambda_minor`). |
-| `loss` | `pos_weight`, `aniso_mode` | `Trainer` | BCE positive weight; anisotropy penalty mode. |
+| `loss` | `w_class`, `w_topo`, `w_aniso`, `w_size` | `Trainer` | Required under `loss.*` (`reproducibility.allow_legacy_loss_keys=false`). |
+| `loss` | `teacher_mode` | `Trainer` / topo W-Dist | Explicit (`euclidean` or `local_pca`). |
+| `loss` | `pos_weight`, `aniso_mode`, `size_mode` | `Trainer` | BCE positive weight; anisotropy / size penalty modes. |
 | `training` | `lr`, `epochs`, `grad_clip_value`, `visualize_every`, `warmup_epochs` | `main` / `Trainer` | |
 | `training` | `lambda_major`, `lambda_minor`, `lambda_size` | `Trainer` | Ellipse size loss (overrides `w_size` when set). |
 | `training` | `barrier_threshold`, `rotation_augmentation` | `Trainer` | Anisotropy barrier / data aug. |

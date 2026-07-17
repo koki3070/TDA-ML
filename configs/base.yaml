@@ -6,6 +6,12 @@ loss:
   w_topo: 0.1
   w_aniso: 0.01
   w_size: 1.0
+  # Explicit teacher for shared profiles; paper no_cls YAML overrides to local_pca.
+  teacher_mode: euclidean
+  aniso_mode: linear
+  size_mode: quadratic
+  size_ref: 1.34
+  size_power: 1.5
 
 training:
   lr: 0.0003
@@ -29,6 +35,10 @@ model:
     metric_type: "anisotropic" # "anisotropic" or "euclidean"
     distance_backend: "mahalanobis" # or "ellphi"; multiseed driver overrides per run
     ellphi_differentiable: true
+    # Shared profiles use H0+H1; paper no_cls YAML sets [1] (H1-only).
+    homology_dimensions: [0, 1]
+    # mahalanobis may weight by outlier probs; ellphi requires false.
+    prob_weighting: true
   threshold: 0.1
   ellipse_param_dim: 5
   point_dim: 2

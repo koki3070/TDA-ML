@@ -57,6 +57,12 @@ class TestMetrics(unittest.TestCase):
         self.assertAlmostEqual(wdist, expected, places=6)
         self.assertTrue(np.isfinite(wdist))
 
+    def test_wdist_missing_inputs_hard_fail(self):
+        y_true = np.array([0, 1], dtype=int)
+        y_pred = np.array([0, 1], dtype=int)
+        with self.assertRaises(ValueError):
+            compute_recall_specificity_gmean_mcc_wdist(y_true, y_pred)
+
     @staticmethod
     def _circle_gt_inliers(n: int = 12) -> np.ndarray:
         theta = np.linspace(0, 2 * np.pi, n, endpoint=False)

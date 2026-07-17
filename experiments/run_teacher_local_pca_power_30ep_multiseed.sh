@@ -12,7 +12,7 @@
 # Detached (SSH/logout safe; machine reboot still stops the job):
 #   N_WORKERS=4 THREADS_PER_WORKER=4 \
 #   bash experiments/launch_detached_screen.sh pwr30_ms \
-#     outputs/supervised/0710_pwr30_multiseed/driver.log \
+#     outputs/supervised/pwr30_multiseed/driver.log \
 #     experiments/run_teacher_local_pca_power_30ep_multiseed.sh both
 #
 # Parallelism: N_WORKERS seeds per objective wave; THREADS_PER_WORKER per process
@@ -39,27 +39,37 @@ else
   SEEDS=(42 123 456 789 1024)
 fi
 
-WDIST_JSON="${WDIST_JSON:-outputs/tune/0709_pwr_wdist/best_elongate_wdist_ellphi.json}"
-MCC_JSON="${MCC_JSON:-outputs/tune/0709_pwr_mcc_dbscan_mahalanobis/best_elongate_mcc_ellphi_dbscan_mahalanobis.json}"
-WDIST_OUT="${WDIST_OUT:-outputs/supervised/0710_pwr30_wdist}"
-MCC_OUT="${MCC_OUT:-outputs/supervised/0710_pwr30_mcc_maha}"
-LOG_ROOT="${LOG_ROOT:-outputs/supervised/0710_pwr30_multiseed}"
+WDIST_JSON="${WDIST_JSON:-outputs/tune/pwr_wdist/best_elongate_wdist_ellphi.json}"
+MCC_JSON="${MCC_JSON:-outputs/tune/pwr_mcc_dbscan_mahalanobis/best_elongate_mcc_ellphi_dbscan_mahalanobis.json}"
+WDIST_OUT="${WDIST_OUT:-outputs/supervised/pwr30_wdist}"
+MCC_OUT="${MCC_OUT:-outputs/supervised/pwr30_mcc_maha}"
+LOG_ROOT="${LOG_ROOT:-outputs/supervised/pwr30_multiseed}"
 EPOCHS="${EPOCHS:-30}"
 DBSCAN_BACKEND="${DBSCAN_BACKEND:-mahalanobis}"
+BASE_CONFIG="${BASE_CONFIG:-elongate_n100_no_cls_full120_teacher_local_pca}"
 
 mkdir -p "${LOG_ROOT}"
 
 _metrics_done() {
+  # Exit 0 = fresh skip; 1 = missing (run); other = stale/ambiguous hard-fail.
   local out_base="$1"
   local seed="$2"
   local tag="$3"
-  local f
-  for f in "${out_base}"/pwr_s"${seed}"_*/logs/paper_metrics_test_"${tag}".json; do
-    if [[ -f "${f}" ]]; then
-      return 0
-    fi
-  done
-  return 1
+  local tune_json="$4"
+  local rc=0
+  uv run python experiments/power_30ep_freshness.py \
+    --out-base "${out_base}" \
+    --seed "${seed}" \
+    --tag "${tag}" \
+    --tune-json "${tune_json}" || rc=$?
+  if [[ "${rc}" -eq 0 ]]; then
+    return 0
+  fi
+  if [[ "${rc}" -eq 1 ]]; then
+    return 1
+  fi
+  echo "error: freshness check failed for seed=${seed} (rc=${rc})" >&2
+  exit "${rc}"
 }
 
 _run_seed() {
@@ -70,8 +80,8 @@ _run_seed() {
   local seed="$5"
   local log_file="${LOG_ROOT}/${label}_s${seed}.log"
 
-  if _metrics_done "${out_base}" "${seed}" "${tag}"; then
-    echo "[skip] ${label} seed=${seed} (paper_metrics_test already exists)"
+  if _metrics_done "${out_base}" "${seed}" "${tag}" "${tune_json}"; then
+    echo "[skip] ${label} seed=${seed} (fresh paper_metrics_test matches tune/revision)"
     return 0
   fi
 
@@ -80,6 +90,7 @@ _run_seed() {
   MKL_NUM_THREADS="${THREADS_PER_WORKER}" \
   OPENBLAS_NUM_THREADS="${THREADS_PER_WORKER}" \
   uv run python -u experiments/run_teacher_local_pca_power_30ep.py \
+    --base-config "${BASE_CONFIG}" \
     --epochs "${EPOCHS}" \
     --seed "${seed}" \
     --out-base "${out_base}" \
@@ -100,8 +111,8 @@ _run_seed_batch() {
   local seed pid
 
   for seed in "${seeds[@]}"; do
-    if _metrics_done "${out_base}" "${seed}" "${tag}"; then
-      echo "[skip] ${label} seed=${seed} (paper_metrics_test already exists)"
+    if _metrics_done "${out_base}" "${seed}" "${tag}" "${tune_json}"; then
+      echo "[skip] ${label} seed=${seed} (fresh paper_metrics_test matches tune/revision)"
       continue
     fi
     _run_seed "${label}" "${tune_json}" "${out_base}" "${tag}" "${seed}" &
@@ -128,8 +139,8 @@ _run_method() {
   local pending=()
   local seed
   for seed in "${SEEDS[@]}"; do
-    if _metrics_done "${out_base}" "${seed}" "${tag}"; then
-      echo "[skip] ${label} seed=${seed} (paper_metrics_test already exists)"
+    if _metrics_done "${out_base}" "${seed}" "${tag}" "${tune_json}"; then
+      echo "[skip] ${label} seed=${seed} (fresh paper_metrics_test matches tune/revision)"
     else
       pending+=("${seed}")
     fi
@@ -175,6 +186,8 @@ echo "Aggregating..."
 AGG_ARGS=(
   --wdist-out "${WDIST_OUT}"
   --mcc-out "${MCC_OUT}"
+  --wdist-tune-json "${WDIST_JSON}"
+  --mcc-tune-json "${MCC_JSON}"
   --out-dir "${LOG_ROOT}"
   --seeds "${SEEDS[@]}"
 )

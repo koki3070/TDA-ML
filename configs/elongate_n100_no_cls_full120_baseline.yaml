@@ -1,5 +1,4 @@
-# Pure baseline: no fix1 (median), no fix2 (min_b), no fix3 (topo12).
-# Full 120-point cloud for topo loss (default max_points unset).
+# no_cls baseline contrast: full 120-point cloud for topo loss (default max_points unset).
 
 meta:
   config_id: "elongate_n100_no_cls_full120_baseline"
@@ -14,6 +13,7 @@ model:
     distance_backend: "mahalanobis"
     ellphi_differentiable: true
     prob_weighting: false
+    homology_dimensions: [1]
 
 loss:
   w_class: 0.0
@@ -22,6 +22,10 @@ loss:
   w_size: 0.488
   pos_weight: 1.0
   aniso_mode: "elongate"
+  size_mode: power
+  size_ref: 1.34
+  size_power: 1.5
+  teacher_mode: euclidean
 
 training:
   lr: 0.000158

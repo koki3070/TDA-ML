@@ -19,31 +19,83 @@ from tda_ml.distance_backend import (
     rescale_distance_matrix,
     subsample_indices,
 )
+from tda_ml.persistence_dimensions import (
+    normalize_homology_dimensions,
+    select_persistence_dimensions,
+)
 from tda_ml.teacher_pd import compute_clean_teacher_batch
 
 
 @dataclass(frozen=True)
 class TopoWdistOptions:
-    teacher_mode: str = "local_pca"
-    distance_backend: str = "ellphi"
+    """Eval options; method-defining fields have no silent defaults."""
+
+    teacher_mode: str
+    distance_backend: str
+    homology_dimensions: tuple[int, ...]
+    prob_weighting: bool
     teacher_local_pca_k: int = 10
     teacher_local_pca_normalize_axes: bool = True
     eps_scale: float = 1.0
     scale_mode: str = "fixed"
     max_points: int | None = None
-    prob_weighting: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "homology_dimensions",
+            normalize_homology_dimensions(self.homology_dimensions),
+        )
+        object.__setattr__(
+            self,
+            "teacher_mode",
+            str(self.teacher_mode).strip().lower(),
+        )
+        object.__setattr__(
+            self,
+            "distance_backend",
+            str(self.distance_backend).strip().lower(),
+        )
+        object.__setattr__(self, "prob_weighting", bool(self.prob_weighting))
+        object.__setattr__(
+            self,
+            "scale_mode",
+            str(self.scale_mode).strip().lower(),
+        )
+        if self.scale_mode not in ("fixed", "median"):
+            raise ValueError(
+                f"scale_mode must be 'fixed' or 'median', got {self.scale_mode!r}"
+            )
 
 
 def topo_wdist_options_from_config(config: dict[str, Any]) -> TopoWdistOptions:
-    loss_cfg = config.get("loss", {})
-    training_cfg = config.get("training", {})
-    topo_cfg = config.get("model", {}).get("topology_loss", {})
+    """Build options from config; missing method fields hard-fail."""
+    loss_cfg = config.get("loss") or {}
+    training_cfg = config.get("training") or {}
+    topo_cfg = (config.get("model") or {}).get("topology_loss") or {}
+
+    missing_topo = [
+        key
+        for key in ("distance_backend", "homology_dimensions", "prob_weighting")
+        if key not in topo_cfg
+    ]
+    if missing_topo:
+        raise ValueError(
+            "topo W-Dist requires explicit model.topology_loss fields "
+            f"{missing_topo}; refusing silent defaults"
+        )
+
+    teacher_mode = loss_cfg.get("teacher_mode", training_cfg.get("teacher_mode"))
+    if teacher_mode is None:
+        raise ValueError(
+            "topo W-Dist requires explicit loss.teacher_mode "
+            "(or training.teacher_mode); refusing silent euclidean default"
+        )
+
     max_pts = training_cfg.get("topo_loss_max_points", loss_cfg.get("topo_loss_max_points"))
     return TopoWdistOptions(
-        teacher_mode=str(
-            loss_cfg.get("teacher_mode", training_cfg.get("teacher_mode", "local_pca"))
-        ).strip().lower(),
-        distance_backend=str(topo_cfg.get("distance_backend", "mahalanobis")).lower().strip(),
+        teacher_mode=str(teacher_mode).strip().lower(),
+        distance_backend=str(topo_cfg["distance_backend"]).lower().strip(),
         teacher_local_pca_k=int(
             loss_cfg.get(
                 "teacher_local_pca_k",
@@ -63,7 +115,10 @@ def topo_wdist_options_from_config(config: dict[str, Any]) -> TopoWdistOptions:
             loss_cfg.get("topo_scale_mode", training_cfg.get("topo_scale_mode", "fixed"))
         ).strip().lower(),
         max_points=int(max_pts) if max_pts is not None else None,
-        prob_weighting=bool(topo_cfg.get("prob_weighting", True)),
+        prob_weighting=bool(topo_cfg["prob_weighting"]),
+        homology_dimensions=normalize_homology_dimensions(
+            topo_cfg["homology_dimensions"]
+        ),
     )
 
 
@@ -82,15 +137,21 @@ def compute_topo_wdist(
     points: np.ndarray,
     params: np.ndarray,
     clean_pc: np.ndarray,
-    options: TopoWdistOptions | None = None,
+    options: TopoWdistOptions,
 ) -> float:
     """
-    Wasserstein-2 distance between H1 PDs (same units as ``TopologicalLoss`` term).
+    Wasserstein-2 distance over configured homology dimensions.
 
     ``points`` / ``params``: full noisy cloud and learned ellipses (DBSCAN unused).
     ``clean_pc``: padded clean inlier coordinates for the teacher PD.
+    ``options`` is required (no silent TopoWdistOptions defaults).
     """
-    opts = options or TopoWdistOptions()
+    if options is None:
+        raise ValueError(
+            "compute_topo_wdist requires explicit TopoWdistOptions; "
+            "refusing silent defaults"
+        )
+    opts = options
     pts = torch.as_tensor(points, dtype=torch.float32)
     par = torch.as_tensor(params[..., :3], dtype=torch.float32)
     clean = torch.as_tensor(clean_pc, dtype=torch.float32)
@@ -117,6 +178,12 @@ def compute_topo_wdist(
             need_clean_scales=(opts.scale_mode == "median"),
         )
 
+        if opts.prob_weighting:
+            raise ValueError(
+                "compute_topo_wdist does not apply outlier-probability weighting; "
+                "set model.topology_loss.prob_weighting=false (refusing silent probs=None)"
+            )
+
         pts_i, par_i = _subsample_cloud(pts, par, opts.max_points)
         d_batch = compute_distance_matrix_batch(
             pts_i.unsqueeze(0),
@@ -134,7 +201,13 @@ def compute_topo_wdist(
             clean_scale=clean_scale_i,
         )
         pd_pred = vr(d_mat, treat_as_distances=True)
-        w2_sq = wdist_fn(pd_pred, clean_pd_info[0]) ** 2
+        pd_pred_selected = select_persistence_dimensions(
+            pd_pred, opts.homology_dimensions
+        )
+        clean_pd_selected = select_persistence_dimensions(
+            clean_pd_info[0], opts.homology_dimensions
+        )
+        w2_sq = wdist_fn(pd_pred_selected, clean_pd_selected) ** 2
         value = float(w2_sq.item())
         if not np.isfinite(value):
             raise RuntimeError("non-finite topo W-Dist")
