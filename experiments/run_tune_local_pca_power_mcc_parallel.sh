@@ -12,7 +12,7 @@
 #
 # Detached:
 #   bash experiments/launch_detached_screen.sh tune_power_mcc_maha \
-#     outputs/tune/0709_pwr_mcc_maha/launcher.log \
+#     outputs/tune/pwr_mcc_maha/launcher.log \
 #     experiments/run_tune_local_pca_power_mcc_parallel.sh 4 24 20 ellphi mahalanobis
 
 set -euo pipefail
@@ -26,7 +26,7 @@ TUNE_EPOCHS="${3:-20}"
 BACKEND="${4:-ellphi}"
 DBSCAN_BACKEND="${5:-mahalanobis}"
 BASE_CONFIG="elongate_n100_no_cls_tune_local_pca_ellphi_power_mcc"
-OUT_BASE="${OUT_BASE:-outputs/tune/0709_pwr_mcc_dbscan_${DBSCAN_BACKEND}}"
+OUT_BASE="${OUT_BASE:-outputs/tune/pwr_mcc_dbscan_${DBSCAN_BACKEND}}"
 STUDY_NAME="elongate_local_pca_power_mcc_${BACKEND}_dbscan_${DBSCAN_BACKEND}"
 STORAGE="sqlite:///${OUT_BASE}/study.db"
 THREADS_PER_WORKER=12

@@ -20,7 +20,7 @@ from tda_ml.preflight import (  # noqa: E402
 )
 
 BASE_CONFIG = "elongate_n100_no_cls_full120_teacher_local_pca"
-DEFAULT_OUT = REPO_ROOT / "outputs/supervised/0709_pwr30"
+DEFAULT_OUT = REPO_ROOT / "outputs/supervised/pwr30"
 TAG = "power_valtopo_paper_eval"
 TAG_MCC = "power_mcc_valtopo_paper_eval"
 TAG_WDIST = "power_wdist_valtopo_paper_eval"
@@ -91,7 +91,7 @@ def main() -> int:
     out_base = args.out_base
     if out_base is None:
         out_base = (
-            REPO_ROOT / "outputs/supervised/0709_pwr30_mcc"
+            REPO_ROOT / "outputs/supervised/pwr30_mcc"
             if tune_json is not None
             else DEFAULT_OUT
         )

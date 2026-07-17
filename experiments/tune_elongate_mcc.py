@@ -219,7 +219,7 @@ def parse_args() -> argparse.Namespace:
             "not a point-to-point distance)."
         ),
     )
-    p.add_argument("--out-base", default="outputs/tune/0709_pwr_mcc")
+    p.add_argument("--out-base", default="outputs/tune/pwr_mcc")
     p.add_argument("--size-mode", default="power", choices=["quadratic", "power", "softplus", "barrier"])
     p.add_argument("--size-ref", type=float, default=1.34)
     p.add_argument("--size-power", type=float, default=1.5)

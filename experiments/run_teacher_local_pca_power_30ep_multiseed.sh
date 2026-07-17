@@ -12,7 +12,7 @@
 # Detached (SSH/logout safe; machine reboot still stops the job):
 #   N_WORKERS=4 THREADS_PER_WORKER=4 \
 #   bash experiments/launch_detached_screen.sh pwr30_ms \
-#     outputs/supervised/0710_pwr30_multiseed/driver.log \
+#     outputs/supervised/pwr30_multiseed/driver.log \
 #     experiments/run_teacher_local_pca_power_30ep_multiseed.sh both
 #
 # Parallelism: N_WORKERS seeds per objective wave; THREADS_PER_WORKER per process

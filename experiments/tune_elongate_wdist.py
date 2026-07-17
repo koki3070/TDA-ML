@@ -9,12 +9,13 @@ Each trial:
 2. Loads ``best_model.pth`` (val_topo selection checkpoint; hard-fail if missing).
 3. Objective = mean val **topo W-Dist** (learned ellipses vs local_pca teacher PD).
 
-Base config ``elongate_n100_no_cls_tune_local_pca`` sets ``teacher_mode: local_pca``,
+Base config ``elongate_n100_no_cls_tune_local_pca_ellphi_power_mcc`` sets
+``teacher_mode: local_pca``, H1-only persistence, and ``size_mode: power``.
 ``w_class: 0``, ``selection.metric: val_topo``.
 
 Usage (parallel, recommended)::
 
-    bash experiments/run_tune_local_pca_parallel.sh 8 50 20 ellphi
+    bash experiments/run_tune_local_pca_power_wdist_parallel.sh 8 50 20 ellphi
 """
 
 from __future__ import annotations

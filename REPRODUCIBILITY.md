@@ -144,9 +144,7 @@ uv run python experiments/run_backend_multiseed.py \
 
 ### ellphi + power：二目的チューニング（実験メモ）
 
-no_cls・local_pca 教師・`size_mode=power` スタックについて、**W-Dist 最小**と **DBSCAN MCC 最大**の 2 本の Optuna study、および各 best 重みでの 30ep 本番結果は、次にまとめています。
-
-- [`docs/experiments/20260710_power_dual_objective.md`](docs/experiments/20260710_power_dual_objective.md) — 各段階の**目的**、距離 backend の使い分け、数値表、再現コマンド、成果物パス
+no_cls・local_pca 教師・`size_mode=power` スタックでは、`run_tune_local_pca_power_objectives.sh` が **W-Dist 最小**と **DBSCAN MCC 最大**の 2 本の Optuna study を実行し、`run_teacher_local_pca_power_30ep_multiseed.sh` が固定した best 重みで 30ep 本番を実行します。
 
 要点: **学習 topo loss と教師 PD は ellphi**；**MCC のチューニング objective と paper eval の DBSCAN は mahalanobis**（filtration 時刻をクラスタリング距離に使わない）。
 
