@@ -96,16 +96,16 @@ class TestTopoEpsScale(unittest.TestCase):
     def test_invalid_scale_mode_raises(self):
         from tda_ml.losses import TopologicalLoss
         with self.assertRaises(ValueError):
-            TopologicalLoss(scale_mode="bogus")
+            TopologicalLoss(scale_mode="bogus", homology_dimensions=[0, 1])
 
     def test_eps_scale_default_is_noop(self):
         """eps_scale=1.0 (fixed) must not change the loss vs. an explicit 1.0."""
         from tda_ml.losses import TopologicalLoss
         pt, par, logits = self._inputs()
         clean = self._clean_pd(pt)
-        base = TopologicalLoss(weight=1.0, distance_backend="mahalanobis", prob_weighting=False)
+        base = TopologicalLoss(weight=1.0, distance_backend="mahalanobis", prob_weighting=False, homology_dimensions=[0, 1])
         same = TopologicalLoss(weight=1.0, distance_backend="mahalanobis",
-                               prob_weighting=False, eps_scale=1.0)
+                               prob_weighting=False, eps_scale=1.0, homology_dimensions=[0, 1])
         l0 = base(pt, par, logits, clean).item()
         l1 = same(pt, par, logits, clean).item()
         self.assertAlmostEqual(l0, l1, places=6)
@@ -115,9 +115,9 @@ class TestTopoEpsScale(unittest.TestCase):
         from tda_ml.losses import TopologicalLoss
         pt, par, logits = self._inputs()
         clean = self._clean_pd(pt)
-        base = TopologicalLoss(weight=1.0, distance_backend="mahalanobis", prob_weighting=False)
+        base = TopologicalLoss(weight=1.0, distance_backend="mahalanobis", prob_weighting=False, homology_dimensions=[0, 1])
         scaled = TopologicalLoss(weight=1.0, distance_backend="mahalanobis",
-                                 prob_weighting=False, eps_scale=0.3)
+                                 prob_weighting=False, eps_scale=0.3, homology_dimensions=[0, 1])
         l0 = base(pt, par, logits, clean).item()
         ls = scaled(pt, par, logits, clean).item()
         self.assertGreater(abs(l0 - ls), 1e-6)
@@ -128,7 +128,7 @@ class TestTopoEpsScale(unittest.TestCase):
         par = par.clone().requires_grad_(True)
         clean = self._clean_pd(pt)
         loss_fn = TopologicalLoss(weight=1.0, distance_backend="mahalanobis",
-                                  prob_weighting=False, scale_mode="median")
+                                  prob_weighting=False, scale_mode="median", homology_dimensions=[0, 1])
         # clean_scales (m_e) provided by the trainer; loss brings prediction onto it.
         clean_scales = [float(torch.pdist(pt[i]).median()) for i in range(pt.shape[0])]
         loss = loss_fn(pt, par, logits, clean, clean_scales=clean_scales)
@@ -142,7 +142,7 @@ class TestTopoEpsScale(unittest.TestCase):
         from tda_ml.losses import TopologicalLoss
         pt, par, logits = self._inputs()
         loss_fn = TopologicalLoss(weight=1.0, distance_backend="mahalanobis",
-                                  prob_weighting=False, scale_mode="median")
+                                  prob_weighting=False, scale_mode="median", homology_dimensions=[0, 1])
         i = 0
         from tda_ml.distance_backend import compute_distance_matrix_batch
         D = compute_distance_matrix_batch(pt, par, probs=None, symmetrize="max",
@@ -190,6 +190,7 @@ class TestTopoSubsampling(unittest.TestCase):
             distance_backend="mahalanobis",
             prob_weighting=False,
             max_points=12,
+            homology_dimensions=[0, 1],
         )
         loss = loss_fn(pt, par, logits, clean)
         self.assertTrue(torch.isfinite(loss))

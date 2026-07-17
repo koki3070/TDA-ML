@@ -166,11 +166,26 @@ class Trainer:
 
         # Initialize Losses
         self.class_loss_fn = ClassificationLoss(pos_weight=pos_weight)
-        _topo = config.get("model", {}).get("topology_loss", {})
-        self.distance_backend = _topo.get("distance_backend", "mahalanobis")
-        self.ellphi_differentiable = _topo.get("ellphi_differentiable", True)
-        self.prob_weighting = bool(_topo.get("prob_weighting", True))
-        self.homology_dimensions = _topo.get("homology_dimensions")
+        _topo = config.get("model", {}).get("topology_loss", {}) or {}
+        missing_topo = [
+            key
+            for key in ("distance_backend", "homology_dimensions", "prob_weighting")
+            if key not in _topo
+        ]
+        if missing_topo:
+            raise ValueError(
+                "model.topology_loss must explicitly define "
+                f"{missing_topo}; refusing silent defaults"
+            )
+        teacher_raw = loss_cfg.get("teacher_mode", training_cfg.get("teacher_mode"))
+        if teacher_raw is None:
+            raise ValueError(
+                "loss.teacher_mode must be set explicitly; refusing silent euclidean default"
+            )
+        self.distance_backend = str(_topo["distance_backend"]).lower().strip()
+        self.ellphi_differentiable = bool(_topo.get("ellphi_differentiable", True))
+        self.prob_weighting = bool(_topo["prob_weighting"])
+        self.homology_dimensions = _topo["homology_dimensions"]
         # Filtration-unit alignment for the topology loss (see TopologicalLoss).
         # Legacy knob `training.topo_eps_scale` (v73=0.7022); also accept loss.topo_eps_scale.
         self.topo_eps_scale = float(
@@ -179,9 +194,7 @@ class Trainer:
         self.topo_scale_mode = str(
             loss_cfg.get("topo_scale_mode", training_cfg.get("topo_scale_mode", "fixed"))
         ).strip().lower()
-        self.teacher_mode = str(
-            loss_cfg.get("teacher_mode", training_cfg.get("teacher_mode", "euclidean"))
-        ).strip().lower()
+        self.teacher_mode = str(teacher_raw).strip().lower()
         self.teacher_local_pca_k = int(
             loss_cfg.get(
                 "teacher_local_pca_k",
@@ -203,7 +216,7 @@ class Trainer:
                 else ""
             ),
             self.prob_weighting,
-            self.homology_dimensions if self.homology_dimensions is not None else [0, 1],
+            self.homology_dimensions,
             self.topo_scale_mode,
             self.topo_eps_scale,
             self.teacher_mode,

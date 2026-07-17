@@ -1,5 +1,7 @@
 # Paper no_cls production: local-PCA teacher + ellphi topo + H1-only Wasserstein.
 # Degenerate ellphi geometry hard-fails.
+# Production 30ep weights MUST come from an H1-only Optuna best JSON (--tune-json).
+# The w_* / lr values below are Optuna prior centres only (not paper results).
 
 meta:
   config_id: "elongate_n100_no_cls_full120_teacher_local_pca"
@@ -11,13 +13,14 @@ model:
   threshold: 0.5
   topology_loss:
     metric_type: "anisotropic"
-    distance_backend: "mahalanobis"  # overridden per run by production driver
+    distance_backend: "ellphi"
     ellphi_differentiable: true
     prob_weighting: false
     homology_dimensions: [1]
 
 loss:
   w_class: 0.0
+  # Prior centres for Optuna; paper production requires --tune-json overrides.
   w_topo: 0.0883
   w_aniso: 0.0541
   w_size: 0.488

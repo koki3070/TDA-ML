@@ -21,8 +21,6 @@ from tda_ml.preflight import (  # noqa: E402
 )
 
 BASE_CONFIG = "elongate_n100_no_cls_full120_teacher_local_pca"
-DEFAULT_OUT = REPO_ROOT / "outputs/supervised/pwr30"
-TAG = "power_valtopo_paper_eval"
 TAG_MCC = "power_mcc_valtopo_paper_eval"
 TAG_WDIST = "power_wdist_valtopo_paper_eval"
 
@@ -38,8 +36,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--tune-json",
         type=Path,
-        default=None,
-        help="Optuna best JSON (overrides w_topo/w_aniso/w_size/lr).",
+        required=True,
+        help=(
+            "H1-only Optuna best JSON (required). YAML-embedded w_*/lr are prior "
+            "centres only and must not be used as paper production weights."
+        ),
     )
     p.add_argument(
         "--tag",
@@ -71,12 +72,10 @@ def load_tune_weights(path: Path) -> dict[str, float]:
     }
 
 
-def infer_tag(tune_json: Path | None, explicit: str | None) -> str:
+def infer_tag(tune_json: Path, explicit: str | None) -> str:
     """Map tune objective to paper-eval tag; hard-fail on unknown objective."""
     if explicit:
         return explicit
-    if tune_json is None:
-        return TAG
     payload = json.loads(tune_json.read_text(encoding="utf-8"))
     kind = classify_tune_objective(
         str(payload.get("objective", "")),
@@ -93,56 +92,54 @@ def main() -> int:
     tag = infer_tag(tune_json, args.tag)
     out_base = args.out_base
     if out_base is None:
-        if tune_json is None:
-            out_base = DEFAULT_OUT
-        elif tag == TAG_WDIST:
+        if tag == TAG_WDIST:
             out_base = REPO_ROOT / "outputs/supervised/pwr30_wdist"
         else:
             out_base = REPO_ROOT / "outputs/supervised/pwr30_mcc"
     out_base.mkdir(parents=True, exist_ok=True)
 
-    if tune_json is not None:
-        preflight_tune_production_run(
-            base_config=args.base_config,
-            tune_json=tune_json,
-            project_root=REPO_ROOT,
-            out_base=out_base,
-            config_overrides={
-                "loss": {
-                    "size_mode": "power",
-                    "size_ref": args.size_ref,
-                    "size_power": args.size_power,
-                },
-                "training": {"epochs": args.epochs},
-                "data": {"seed": args.seed},
-                "model": {
-                    "topology_loss": {
-                        "distance_backend": "ellphi",
-                        "prob_weighting": False,
-                    }
-                },
-                "outputs": {"base_dir": str(out_base)},
+    preflight_tune_production_run(
+        base_config=args.base_config,
+        tune_json=tune_json,
+        project_root=REPO_ROOT,
+        out_base=out_base,
+        config_overrides={
+            "loss": {
+                "aniso_mode": "elongate",
+                "size_mode": "power",
+                "size_ref": args.size_ref,
+                "size_power": args.size_power,
             },
-        )
+            "training": {"epochs": args.epochs},
+            "data": {"seed": args.seed},
+            "model": {
+                "topology_loss": {
+                    "distance_backend": "ellphi",
+                    "prob_weighting": False,
+                    "homology_dimensions": [1],
+                }
+            },
+            "outputs": {"base_dir": str(out_base)},
+        },
+    )
 
     loss_overrides: dict = {
+        "aniso_mode": "elongate",
         "size_mode": "power",
         "size_ref": args.size_ref,
         "size_power": args.size_power,
     }
     training_overrides: dict = {"epochs": args.epochs}
-    tune_source = None
-    if tune_json is not None:
-        tune_weights = load_tune_weights(tune_json)
-        loss_overrides.update(
-            {
-                "w_topo": tune_weights["w_topo"],
-                "w_aniso": tune_weights["w_aniso"],
-                "w_size": tune_weights["w_size"],
-            }
-        )
-        training_overrides["lr"] = tune_weights["lr"]
-        tune_source = str(tune_json)
+    tune_weights = load_tune_weights(tune_json)
+    loss_overrides.update(
+        {
+            "w_topo": tune_weights["w_topo"],
+            "w_aniso": tune_weights["w_aniso"],
+            "w_size": tune_weights["w_size"],
+        }
+    )
+    training_overrides["lr"] = tune_weights["lr"]
+    tune_source = str(tune_json)
 
     cfg = deep_update(
         cfg,
@@ -158,6 +155,7 @@ def main() -> int:
                 "topology_loss": {
                     "distance_backend": "ellphi",
                     "prob_weighting": False,
+                    "homology_dimensions": [1],
                 }
             },
             "outputs": {"base_dir": str(out_base)},
@@ -166,9 +164,9 @@ def main() -> int:
 
     purpose = {
         "tag": tag,
-        "size_mode": cfg["loss"].get("size_mode", "power"),
-        "size_ref": cfg["loss"].get("size_ref", args.size_ref),
-        "size_power": cfg["loss"].get("size_power", args.size_power),
+        "size_mode": cfg["loss"]["size_mode"],
+        "size_ref": cfg["loss"]["size_ref"],
+        "size_power": cfg["loss"]["size_power"],
         "weights": {
             "w_topo": cfg["loss"]["w_topo"],
             "w_aniso": cfg["loss"]["w_aniso"],
@@ -178,14 +176,14 @@ def main() -> int:
         "selection": cfg["training"]["selection"]["metric"],
         "tune_json": tune_source,
         "dbscan_backend": args.dbscan_backend,
-        "aniso_mode": cfg["loss"].get("aniso_mode"),
+        "aniso_mode": cfg["loss"]["aniso_mode"],
         "homology_dimensions": cfg["model"]["topology_loss"]["homology_dimensions"],
         "paper_no_cls_contract": paper_contract,
         "protocol_note": (
             "power 30ep H1-only: raw ellipse params to ellphi; degenerate geometry "
             "hard-fails; tune weights fixed from seed-42 Optuna"
         ),
-        "reference": tune_source or "recover baseline (~0.76 test MCC, quadratic size)",
+        "reference": tune_source,
     }
     cfg["_manifest_extras"] = {
         "tune_json": tune_source,

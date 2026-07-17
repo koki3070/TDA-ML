@@ -22,11 +22,14 @@ training:
 loss:
   pos_weight: 0.2
   aniso_mode: "barrier"
+  teacher_mode: euclidean
 
 model:
   threshold: 0.5
   topology_loss:
     distance_backend: "mahalanobis"
+    homology_dimensions: [0, 1]
+    prob_weighting: true
 
 data:
   batch_size: 4

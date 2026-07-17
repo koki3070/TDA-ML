@@ -8,10 +8,16 @@ from typing import Any
 SUPPORTED_HOMOLOGY_DIMENSIONS = (0, 1)
 
 
-def normalize_homology_dimensions(value: Iterable[int] | None) -> tuple[int, ...]:
-    """Validate an explicit subset of the currently supported dimensions."""
+def normalize_homology_dimensions(value: Iterable[int]) -> tuple[int, ...]:
+    """Validate an explicit subset of the currently supported dimensions.
+
+    Missing / ``None`` hard-fails: never infer H0+H1.
+    """
     if value is None:
-        return SUPPORTED_HOMOLOGY_DIMENSIONS
+        raise ValueError(
+            "homology_dimensions must be set explicitly; "
+            "refusing silent default to H0+H1"
+        )
     dimensions = tuple(int(dim) for dim in value)
     if not dimensions:
         raise ValueError("homology_dimensions must not be empty")
@@ -30,7 +36,7 @@ def normalize_homology_dimensions(value: Iterable[int] | None) -> tuple[int, ...
 
 def select_persistence_dimensions(
     persistence_info: Sequence[Any],
-    dimensions: Iterable[int] | None,
+    dimensions: Iterable[int],
 ) -> list[Any]:
     """Select persistence records by their declared ``dimension`` field."""
     requested = normalize_homology_dimensions(dimensions)

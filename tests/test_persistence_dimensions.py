@@ -22,10 +22,11 @@ class TestPersistenceDimensions(unittest.TestCase):
         )
         self.info = VietorisRipsComplex(dim=1)(points)
 
-    def test_default_selects_h0_and_h1(self):
-        self.assertEqual(normalize_homology_dimensions(None), (0, 1))
-        selected = select_persistence_dimensions(self.info, None)
-        self.assertEqual([item.dimension for item in selected], [0, 1])
+    def test_missing_homology_dimensions_hard_fail(self):
+        with self.assertRaisesRegex(ValueError, "explicit"):
+            normalize_homology_dimensions(None)
+        with self.assertRaisesRegex(ValueError, "explicit"):
+            select_persistence_dimensions(self.info, None)
 
     def test_h1_only_selects_one_diagram(self):
         selected = select_persistence_dimensions(self.info, [1])
@@ -60,10 +61,27 @@ class TestPersistenceDimensions(unittest.TestCase):
         self.assertTrue(torch.isfinite(h1))
         self.assertNotEqual(float(both), float(h1))
 
+    def test_topo_wdist_options_require_explicit_method_fields(self):
+        with self.assertRaisesRegex(ValueError, "explicit"):
+            topo_wdist_options_from_config(
+                {"model": {"topology_loss": {"homology_dimensions": [1]}}}
+            )
+
     def test_topo_wdist_options_read_h1_only(self):
-        cfg = {"model": {"topology_loss": {"homology_dimensions": [1]}}}
+        cfg = {
+            "model": {
+                "topology_loss": {
+                    "homology_dimensions": [1],
+                    "distance_backend": "mahalanobis",
+                    "prob_weighting": False,
+                }
+            },
+            "loss": {"teacher_mode": "local_pca"},
+        }
         opts = topo_wdist_options_from_config(cfg)
         self.assertEqual(opts.homology_dimensions, (1,))
+        self.assertEqual(opts.teacher_mode, "local_pca")
+        self.assertFalse(opts.prob_weighting)
 
     def test_topological_loss_runs_with_h1_only(self):
         theta = torch.linspace(0.0, 2.0 * torch.pi, 9)[:-1]

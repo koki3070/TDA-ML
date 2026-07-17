@@ -11,7 +11,7 @@ model:
   threshold: 0.5
   topology_loss:
     metric_type: "anisotropic"
-    distance_backend: "mahalanobis"  # overridden per trial (--backend ellphi)
+    distance_backend: "ellphi"
     ellphi_differentiable: true
     prob_weighting: false
     homology_dimensions: [1]

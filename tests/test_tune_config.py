@@ -58,6 +58,7 @@ class TestTuneTrialConfig(unittest.TestCase):
         self.assertEqual(cfg["model"]["topology_loss"]["homology_dimensions"], [1])
         self.assertEqual(cfg["loss"]["aniso_mode"], "elongate")
         self.assertEqual(cfg["loss"]["size_mode"], "power")
+        self.assertEqual(cfg["model"]["topology_loss"]["distance_backend"], "ellphi")
 
 
 if __name__ == "__main__":

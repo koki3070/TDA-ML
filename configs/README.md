@@ -24,11 +24,13 @@ Canonical YAML files live **in this directory** (deep-merged with `base.yaml` by
 | `meta` | `config_id` | `main` | Run directory prefix `<config_id>_<timestamp>`. |
 | `model` | `point_dim`, `feature_dim` | `main` | Passed to `AnisotropicOutlierClassifier`. |
 | `model` | `threshold` | `Trainer` | Classification threshold. |
-| `model` | `topology_loss.distance_backend` | `Trainer` | `mahalanobis` or `ellphi` (set by multiseed driver per run). |
+| `model` | `topology_loss.distance_backend` | `Trainer` | `mahalanobis` or `ellphi` (explicit; no silent default). |
+| `model` | `topology_loss.homology_dimensions` | `Trainer` / topo W-Dist | Explicit list (e.g. `[0,1]` or paper `[1]`). |
+| `model` | `topology_loss.prob_weighting` | `Trainer` | Explicit bool; `ellphi` requires `false`. |
 | `model` | `topology_loss.ellphi_differentiable` | `Trainer` | Default `true`; multiseed driver reads from merged config. |
-| `loss` | `w_class`, `w_topo`, `w_aniso` | `Trainer` | Loss weights (fallback: `training.lambda_*`). |
-| `loss` | `w_size` | `Trainer` | Size regularization scale (fallback: `training.lambda_size` / `lambda_major` / `lambda_minor`). |
-| `loss` | `pos_weight`, `aniso_mode` | `Trainer` | BCE positive weight; anisotropy penalty mode. |
+| `loss` | `w_class`, `w_topo`, `w_aniso`, `w_size` | `Trainer` | Required under `loss.*` (`reproducibility.allow_legacy_loss_keys=false`). |
+| `loss` | `teacher_mode` | `Trainer` / topo W-Dist | Explicit (`euclidean` or `local_pca`). |
+| `loss` | `pos_weight`, `aniso_mode`, `size_mode` | `Trainer` | BCE positive weight; anisotropy / size penalty modes. |
 | `training` | `lr`, `epochs`, `grad_clip_value`, `visualize_every`, `warmup_epochs` | `main` / `Trainer` | |
 | `training` | `lambda_major`, `lambda_minor`, `lambda_size` | `Trainer` | Ellipse size loss (overrides `w_size` when set). |
 | `training` | `barrier_threshold`, `rotation_augmentation` | `Trainer` | Anisotropy barrier / data aug. |

@@ -211,7 +211,7 @@ def parse_args() -> argparse.Namespace:
         choices=["mahalanobis", "ellphi"],
         help="Training topo-loss backend (ellphi = ellipse tangency filtration).",
     )
-    p.add_argument("--out-base", type=str, default="outputs/tune/0629_elongate")
+    p.add_argument("--out-base", type=str, default="outputs/tune/pwr_wdist")
     p.add_argument(
         "--size-mode",
         default="quadratic",
@@ -257,9 +257,11 @@ def main() -> int:
                 "topology_loss": {
                     "distance_backend": args.backend,
                     "prob_weighting": False,
+                    "homology_dimensions": [1],
                 }
             },
             "loss": {
+                "aniso_mode": "elongate",
                 "size_mode": args.size_mode,
                 "size_ref": args.size_ref,
                 "size_power": args.size_power,

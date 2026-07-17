@@ -254,6 +254,7 @@ def main() -> int:
                 "topology_loss": {
                     "distance_backend": args.backend,
                     "prob_weighting": False,
+                    "homology_dimensions": [1],
                 }
             },
             "loss": {

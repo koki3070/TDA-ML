@@ -24,7 +24,10 @@ WDIST_KEYS = ("wdist", "w_dist", "test_wdist")
 def sample_std(values: Sequence[float]) -> float:
     arr = np.asarray(values, dtype=np.float64)
     if arr.size < 2:
-        return 0.0
+        raise ValueError(
+            f"sample_std requires at least 2 values; got {arr.size} "
+            "(refusing silent zero std for incomplete seed sets)"
+        )
     return float(np.std(arr, ddof=1))
 
 
@@ -50,7 +53,10 @@ def discover_seed_metrics(out_base: Path, test_glob: str) -> dict[int, dict[str,
             if slug.startswith("pwr_s"):
                 seed = int(slug.split("_")[1].replace("s", ""))
         if seed is None:
-            continue
+            raise ValueError(
+                f"Cannot resolve seed for metrics path {metrics_path}; "
+                "refusing silent skip"
+            )
         payload = json.loads(metrics_path.read_text(encoding="utf-8"))
         by_seed[seed] = {
             "seed": seed,
@@ -70,14 +76,13 @@ def aggregate_row(
     by_seed: dict[int, dict[str, Any]],
     expected_seeds: Sequence[int],
     tune_json: str,
-) -> tuple[dict[str, Any], list[str]]:
-    warnings: list[str] = []
+) -> dict[str, Any]:
     missing = [s for s in expected_seeds if s not in by_seed]
     if missing:
-        warnings.append(f"{method}: missing seeds {missing}")
-    seeds_present = [by_seed[s] for s in expected_seeds if s in by_seed]
-    if not seeds_present:
-        raise ValueError(f"No metrics for {method} under expected seeds")
+        raise ValueError(
+            f"{method}: missing seeds {missing}; refusing partial aggregate"
+        )
+    seeds_present = [by_seed[s] for s in expected_seeds]
 
     mccs = [r["mcc"] for r in seeds_present]
     gmeans = [r["gmean"] for r in seeds_present]
@@ -95,7 +100,7 @@ def aggregate_row(
             f"{n}/{len(expected_seeds)} seeds; fixed tune weights from {tune_json}; "
             "30ep val_topo ckpt; maha DBSCAN eval"
         ),
-    }, warnings
+    }
 
 
 def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -157,17 +162,16 @@ def main() -> int:
         "mcc": ("proposed_mcc_tune_30ep", mcc_by_seed, args.mcc_tune_json),
     }
     rows: list[dict[str, Any]] = []
-    all_warnings: list[str] = []
     for key in args.methods:
         method, by_seed, tune_json = method_specs[key]
-        row, warnings = aggregate_row(
-            method=method,
-            by_seed=by_seed,
-            expected_seeds=args.seeds,
-            tune_json=tune_json,
+        rows.append(
+            aggregate_row(
+                method=method,
+                by_seed=by_seed,
+                expected_seeds=args.seeds,
+                tune_json=tune_json,
+            )
         )
-        rows.append(row)
-        all_warnings.extend(warnings)
 
     out_dir = args.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -183,20 +187,18 @@ def main() -> int:
             "wdist": wdist_by_seed,
             "mcc": mcc_by_seed,
         },
-        "warnings": all_warnings,
+        "warnings": [],
         "summary_csv": str(summary_path),
     }
     (out_dir / "MANIFEST_proposed.json").write_text(json.dumps(manifest, indent=2) + "\n")
 
-    for w in all_warnings:
-        print(f"WARNING: {w}")
     for row in rows:
         print(
             f"{row['method']}: MCC={row['mcc_mean']:.4f}±{row['mcc_std']:.4f}  "
             f"G-Mean={row['gmean_mean']:.4f}±{row['gmean_std']:.4f}"
         )
     print(f"Wrote {summary_path}")
-    return 0 if not all_warnings else 1
+    return 0
 
 
 if __name__ == "__main__":

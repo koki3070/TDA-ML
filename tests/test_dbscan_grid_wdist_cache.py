@@ -26,7 +26,12 @@ def _toy_cloud() -> PreparedCloud:
 class TestDbscanGridWdistCache(unittest.TestCase):
     def test_topo_wdist_computed_once_per_cloud(self) -> None:
         clouds = [_toy_cloud(), _toy_cloud()]
-        opts = TopoWdistOptions(teacher_mode="euclidean", distance_backend="mahalanobis")
+        opts = TopoWdistOptions(
+            teacher_mode="euclidean",
+            distance_backend="mahalanobis",
+            homology_dimensions=(0, 1),
+            prob_weighting=False,
+        )
         with patch(
             "tda_ml.dbscan_eval.compute_topo_wdist",
             side_effect=[0.5, 0.6],
@@ -42,7 +47,12 @@ class TestDbscanGridWdistCache(unittest.TestCase):
 
     def test_wdist_constant_across_grid_for_same_cloud(self) -> None:
         cloud = _toy_cloud()
-        opts = TopoWdistOptions(teacher_mode="euclidean", distance_backend="mahalanobis")
+        opts = TopoWdistOptions(
+            teacher_mode="euclidean",
+            distance_backend="mahalanobis",
+            homology_dimensions=(0, 1),
+            prob_weighting=False,
+        )
         with patch(
             "tda_ml.dbscan_eval.compute_topo_wdist",
             return_value=0.42,

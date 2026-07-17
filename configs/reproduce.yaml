@@ -13,6 +13,8 @@ model:
     metric_type: "anisotropic"
     distance_backend: "mahalanobis"  # overridden per run by run_backend_multiseed
     ellphi_differentiable: true
+    homology_dimensions: [0, 1]
+    prob_weighting: true  # ellphi runs set false in the multiseed driver
 
 loss:
   w_class: 1.0
@@ -21,6 +23,7 @@ loss:
   w_size: 0.0055785823086202556
   pos_weight: 1.0
   aniso_mode: "linear"
+  teacher_mode: euclidean
 
 training:
   lr: 0.0004897466143769238

@@ -34,6 +34,8 @@ PAPER_NO_CLS_CONTRACT: dict[str, Any] = {
     "teacher_mode": "local_pca",
     "prob_weighting": False,
     "aniso_mode": "elongate",
+    "distance_backend": "ellphi",
+    "size_mode": "power",
 }
 
 
@@ -69,6 +71,19 @@ def assert_paper_no_cls_contract(config: dict[str, Any]) -> dict[str, Any]:
         )
     actual["aniso_mode"] = str(loss["aniso_mode"]).strip().lower()
 
+    if "distance_backend" not in topo:
+        raise ValueError(
+            "Paper no_cls config must explicitly define "
+            "model.topology_loss.distance_backend='ellphi'"
+        )
+    actual["distance_backend"] = str(topo["distance_backend"]).strip().lower()
+
+    if "size_mode" not in loss:
+        raise ValueError(
+            "Paper no_cls config must explicitly define loss.size_mode='power'"
+        )
+    actual["size_mode"] = str(loss["size_mode"]).strip().lower()
+
     if actual != PAPER_NO_CLS_CONTRACT:
         raise ValueError(
             "Paper no_cls contract mismatch: "
@@ -89,26 +104,30 @@ def classify_tune_objective(
     *,
     objective_kind: str | None = None,
 ) -> TuneObjectiveKind:
-    """Resolve tune objective kind from explicit field or whitelist (no substring guess)."""
-    if objective_kind is not None:
-        kind = str(objective_kind).lower().strip()
-        if kind in ("mcc", "wdist"):
-            return kind  # type: ignore[return-value]
+    """Resolve tune objective kind from whitelist; optional kind must agree."""
+    obj = str(objective).strip()
+    from_name = _KNOWN_TUNE_OBJECTIVES.get(obj)
+    if from_name is None:
+        from_name = _KNOWN_TUNE_OBJECTIVES.get(obj.lower())
+    if from_name is None:
         raise ValueError(
-            f"Unrecognized tune objective_kind {objective_kind!r}; expected 'mcc' or 'wdist'."
+            f"Unrecognized tune objective {objective!r}; use a whitelist name: "
+            f"{sorted(_KNOWN_TUNE_OBJECTIVES)}."
         )
 
-    obj = str(objective).strip()
-    if obj in _KNOWN_TUNE_OBJECTIVES:
-        return _KNOWN_TUNE_OBJECTIVES[obj]
-    lower = obj.lower()
-    if lower in _KNOWN_TUNE_OBJECTIVES:
-        return _KNOWN_TUNE_OBJECTIVES[lower]
-
-    raise ValueError(
-        f"Unrecognized tune objective {objective!r}; set objective_kind in tune JSON "
-        f"or use a whitelist name: {sorted(_KNOWN_TUNE_OBJECTIVES)}."
-    )
+    if objective_kind is not None:
+        kind = str(objective_kind).lower().strip()
+        if kind not in ("mcc", "wdist"):
+            raise ValueError(
+                f"Unrecognized tune objective_kind {objective_kind!r}; "
+                "expected 'mcc' or 'wdist'."
+            )
+        if kind != from_name:
+            raise ValueError(
+                f"objective_kind {kind!r} conflicts with objective {objective!r} "
+                f"(whitelist kind={from_name!r})"
+            )
+    return from_name
 
 
 def preflight_training_config(
@@ -127,12 +146,42 @@ def preflight_training_config(
     _require_import("scipy", lambda: __import__("scipy"))
 
     topo = (config.get("model") or {}).get("topology_loss") or {}
-    backend = str(topo.get("distance_backend", "mahalanobis")).lower()
+    loss = config.get("loss") or {}
+    training = config.get("training") or {}
+    missing_topo = [
+        key
+        for key in ("distance_backend", "homology_dimensions", "prob_weighting")
+        if key not in topo
+    ]
+    if missing_topo:
+        raise ValueError(
+            "model.topology_loss must explicitly define "
+            f"{missing_topo}; refusing silent defaults"
+        )
+    if "teacher_mode" not in loss and "teacher_mode" not in training:
+        raise ValueError(
+            "loss.teacher_mode must be set explicitly; refusing silent euclidean default"
+        )
+
+    backend = str(topo["distance_backend"]).lower().strip()
+    if backend not in ("mahalanobis", "ellphi"):
+        raise ValueError(f"Unknown distance_backend {backend!r}")
+    homology_dimensions = list(topo["homology_dimensions"])
+    if not homology_dimensions:
+        raise ValueError("model.topology_loss.homology_dimensions must not be empty")
+    prob_weighting = bool(topo["prob_weighting"])
+    teacher_mode = str(
+        loss.get("teacher_mode", training.get("teacher_mode"))
+    ).strip().lower()
     ellphi_diff = bool(topo.get("ellphi_differentiable", True))
     if backend == "ellphi":
         _require_import("ellphi", lambda: __import__("ellphi"))
         assert_ellphi_repo_matches_pin(project_root=root)
         impl = assert_ellphi_differentiable_available(ellphi_differentiable=ellphi_diff)
+        if prob_weighting:
+            raise ValueError(
+                "distance_backend='ellphi' requires model.topology_loss.prob_weighting=false"
+            )
     else:
         impl = backend
 
@@ -157,7 +206,9 @@ def preflight_training_config(
         "config_id": config.get("meta", {}).get("config_id"),
         "distance_backend": backend,
         "distance_backend_impl": impl,
-        "homology_dimensions": list(topo.get("homology_dimensions", [0, 1])),
+        "homology_dimensions": homology_dimensions,
+        "prob_weighting": prob_weighting,
+        "teacher_mode": teacher_mode,
         "seed": config.get("data", {}).get("seed"),
         "ellphi_repo": build_ellphi_repo_manifest_fields(root),
     }

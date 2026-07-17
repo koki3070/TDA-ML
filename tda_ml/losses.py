@@ -137,7 +137,7 @@ class TopologicalLoss(nn.Module):
     Topological loss: Wasserstein-2 squared between predicted and teacher PDs.
 
     ``homology_dimensions`` selects which VR diagrams enter the Wasserstein sum
-    (default ``(0, 1)``). Paper no_cls stack uses ``[1]`` (H1-only).
+    and must be set explicitly (paper no_cls stack uses ``[1]``).
 
     ``distance_backend``:
       - ``mahalanobis``: anisotropic distance (optional prob weighting)
@@ -150,11 +150,12 @@ class TopologicalLoss(nn.Module):
         weight=0.1,
         distance_backend: str = "mahalanobis",
         ellphi_differentiable: bool = True,
-        prob_weighting: bool = True,
+        prob_weighting: bool = False,
         eps_scale: float = 1.0,
         scale_mode: str = "fixed",
         max_points: int | None = None,
-        homology_dimensions: tuple[int, ...] | list[int] | None = None,
+        *,
+        homology_dimensions: tuple[int, ...] | list[int],
         strict_topo_samples: bool = True,
         manifest_ref: dict | None = None,
     ):
@@ -165,7 +166,7 @@ class TopologicalLoss(nn.Module):
         # When False, outlier-probability weighting of the distance matrix is
         # disabled (probs=None). Only affects the ``mahalanobis`` backend; ``ellphi``
         # never uses probs. Useful for a fair backend ablation against ellphi.
-        self.prob_weighting = prob_weighting
+        self.prob_weighting = bool(prob_weighting)
         # Filtration-unit alignment between the predicted distance matrix (Mahalanobis
         # or ellphi tangency units) and the Euclidean clean (teacher) PD. Legacy
         # ``topo_eps_scale`` (v73 default 0.7022) multiplied D by a scalar; ``ellphi``
