@@ -20,6 +20,7 @@ def sample_local_pca_tangent_outliers(
     box_min: float = -1.0,
     box_max: float = 1.0,
     min_separation: float = MIN_TANGENT_OUTLIER_SEPARATION,
+    existing_points: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """
     Sample outliers by displacing random inliers along local PCA PC1.
@@ -30,10 +31,13 @@ def sample_local_pca_tangent_outliers(
     ``|s| ~ Uniform(offset_min, offset_max)``.
 
     Candidates that leave ``[box_min, box_max]^2`` or land within
-    ``min_separation`` of any inlier or already-accepted outlier are retried:
-    two nearly coincident centers make the ellphi tangency derivative w.r.t. the
-    center undefined. Exhausting ``max_attempts`` hard-fails; candidates are
-    never clipped into the box nor merged onto an existing point.
+    ``min_separation`` of the separation reference set or already-accepted
+    outliers are retried: two nearly coincident centers make the ellphi
+    tangency derivative w.r.t. the center undefined. The separation reference
+    defaults to ``inliers``; pass ``existing_points`` (e.g. noisy inliers that
+    enter the cloud) when PCA geometry and cloud geometry differ. Exhausting
+    ``max_attempts`` hard-fails; candidates are never clipped into the box nor
+    merged onto an existing point.
     """
     if num_outliers <= 0:
         return torch.empty(0, 2, dtype=inliers.dtype, device=inliers.device)
@@ -48,6 +52,11 @@ def sample_local_pca_tangent_outliers(
         )
     if min_separation < 0:
         raise ValueError(f"min_separation must be >= 0; got {min_separation}")
+    sep_ref = inliers if existing_points is None else existing_points
+    if sep_ref.ndim != 2 or sep_ref.shape[-1] != 2:
+        raise ValueError(
+            f"existing_points must be (N, 2); got {tuple(sep_ref.shape)}"
+        )
 
     params = local_pca_ellipse_params(inliers, k=k, normalize_axes=True)  # (N, 3)
     theta = params[:, 2]
@@ -69,8 +78,8 @@ def sample_local_pca_tangent_outliers(
             if not bool(torch.all((cand >= box_min) & (cand <= box_max)).item()):
                 continue
             if min_separation > 0:
-                d_inl = torch.linalg.norm(inliers - cand, dim=-1).min()
-                if bool((d_inl < min_separation).item()):
+                d_ref = torch.linalg.norm(sep_ref - cand, dim=-1).min()
+                if bool((d_ref < min_separation).item()):
                     continue
                 if j > 0:
                     d_out = torch.linalg.norm(outliers[:j] - cand, dim=-1).min()

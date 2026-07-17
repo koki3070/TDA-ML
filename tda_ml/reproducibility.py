@@ -12,6 +12,7 @@ from tda_ml.ellphi_torch import _has_ellphi_grad_api
 from tda_ml.numerical_eps import (
     EIGENVALUE_FLOOR,
     INLIER_PROB_MIN,
+    MIN_ELLPHI_CENTER_SEPARATION,
     NUMERICAL_EPS,
     PCA_RIDGE_EPS,
 )
@@ -258,6 +259,7 @@ def build_reproducibility_manifest_fields(
         "numerical_eps_module": "tda_ml.numerical_eps",
         "numerical_constants": {
             "NUMERICAL_EPS": NUMERICAL_EPS,
+            "MIN_ELLPHI_CENTER_SEPARATION": MIN_ELLPHI_CENTER_SEPARATION,
             "PCA_RIDGE_EPS": PCA_RIDGE_EPS,
             "EIGENVALUE_FLOOR": EIGENVALUE_FLOOR,
             "INLIER_PROB_MIN": INLIER_PROB_MIN,

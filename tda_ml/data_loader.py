@@ -174,24 +174,29 @@ class NoisyMNISTDataset(Dataset):
             inliers = torch.cat([points, points[pad_indices]], dim=0)
             clean_pc_points = points
 
-        if self.noise_std > 0:
-            if self.deterministic:
-                noise = torch.randn(inliers.size(), generator=rng) * self.noise_std
-            else:
-                noise = torch.randn_like(inliers) * self.noise_std
-            inliers = inliers + noise
+        # Isotropic jitter with pairwise min-separation. Padding by duplicated
+        # MNIST pixels otherwise yields near-coincident centers that make the
+        # ellphi tangency derivative w.r.t. mu undefined.
+        from tda_ml.cloud_separation import (
+            apply_noise_with_min_separation,
+            sample_uniform_outliers_with_min_separation,
+        )
+
+        inliers = apply_noise_with_min_separation(
+            inliers, self.noise_std, generator=rng
+        )
 
         if self.num_outliers > 0:
             if self.outlier_mode == "uniform":
-                if self.deterministic:
-                    outliers = torch.rand(self.num_outliers, 2, generator=rng) * 2.0 - 1.0
-                else:
-                    outliers = torch.rand(self.num_outliers, 2) * 2.0 - 1.0
+                outliers = sample_uniform_outliers_with_min_separation(
+                    self.num_outliers, inliers, generator=rng
+                )
             else:
                 from tda_ml.tangent_outliers import sample_local_pca_tangent_outliers
 
                 # Local PCA on clean digit geometry (pre-jitter) so tangent is defined
-                # by the stroke, not by isotropic noise.
+                # by the stroke, not by isotropic noise. Separation is checked
+                # against the *noisy* inliers that actually enter the cloud.
                 pca_src = clean_pc_points if clean_pc_points.shape[0] >= 2 else inliers
                 outliers = sample_local_pca_tangent_outliers(
                     pca_src,
@@ -200,6 +205,7 @@ class NoisyMNISTDataset(Dataset):
                     offset_min=self.tangent_offset_min,
                     offset_max=self.tangent_offset_max,
                     generator=rng,
+                    existing_points=inliers,
                 )
         else:
             outliers = torch.empty(0, 2)
