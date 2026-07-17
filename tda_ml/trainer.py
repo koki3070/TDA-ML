@@ -238,7 +238,6 @@ class Trainer:
             max_points=self.topo_loss_max_points,
             homology_dimensions=self.homology_dimensions,
             strict_topo_samples=self._repro["strict_topo_samples"],
-            allow_topo_center_separation=self._repro["allow_topo_center_separation"],
             manifest_ref=self._manifest_ref,
         )
         self.homology_dimensions = self.topo_loss_fn.homology_dimensions

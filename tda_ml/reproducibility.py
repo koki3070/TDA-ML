@@ -97,9 +97,6 @@ def reproducibility_settings(config: dict[str, Any]) -> dict[str, bool]:
             rep.get("allow_otsu_threshold_fallback", False)
         ),
         "allow_legacy_loss_keys": bool(rep.get("allow_legacy_loss_keys", False)),
-        "allow_topo_center_separation": bool(
-            rep.get("allow_topo_center_separation", False)
-        ),
     }
 
 

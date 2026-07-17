@@ -171,7 +171,6 @@ class TopologicalLoss(nn.Module):
         max_points: int | None = None,
         homology_dimensions: tuple[int, ...] | list[int] | None = None,
         strict_topo_samples: bool = True,
-        allow_topo_center_separation: bool = False,
         manifest_ref: dict | None = None,
     ):
         super().__init__()
@@ -204,7 +203,6 @@ class TopologicalLoss(nn.Module):
             homology_dimensions
         )
         self.strict_topo_samples = bool(strict_topo_samples)
-        self.allow_topo_center_separation = bool(allow_topo_center_separation)
         self.manifest_ref = manifest_ref
         self.vr_complex = VietorisRipsComplex(dim=1)
         self.wasserstein = WassersteinDistance(q=2)
@@ -253,7 +251,6 @@ class TopologicalLoss(nn.Module):
                 symmetrize="max",
                 backend=self.distance_backend,
                 ellphi_differentiable=self.ellphi_differentiable,
-                allow_topo_center_separation=self.allow_topo_center_separation,
             )
             clean_scale_i = clean_scales[i] if clean_scales is not None else None
             d_mat = self._rescale_distance_matrix(d_batch[0], clean_scale=clean_scale_i)

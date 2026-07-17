@@ -195,7 +195,7 @@ $\mathcal{L}_{\mathrm{aniso}} = \frac{10}{N}\sum_i \mathrm{ReLU}(R_i-\tau)^2$。
 **Mahalanobis 距離**（`tda_ml/topology.py`）は outlier 確率 $p_i$ により二乗距離を
 $1/\bigl((1-p_i)(1-p_j)\bigr)$ で重み付け（`INLIER_PROB_MIN` で下限クリップ）。
 
-**数値安定化のみの定数**（モデリング床ではない）は `tda_ml/numerical_eps.py` に集約し、付録で列挙します。encoder の `clamp(0.2)` や legacy の `+10^{-4}` といった**論文に無い床は削除済み**（issue #59）。中心一致時の ellphi nudge（`TOPO_CENTER_SEPARATION_MIN`）は **既定オフ**（`reproducibility.allow_topo_center_separation: false`）。opt-in 時のみ topo / ellphi 経路で適用し manifest に記録する。
+**数値安定化のみの定数**（モデリング床ではない）は `tda_ml/numerical_eps.py` に集約し、付録で列挙します。encoder の `clamp(0.2)` や legacy の `+10^{-4}` といった**論文に無い床は削除済み**（issue #59）。中心一致を含む ellphi 退化は補正せず hard-fail します。
 
 ### issue #59 検証（早期打ち切り + 診断）
 

@@ -87,4 +87,3 @@ reproducibility:
   allow_skip_degenerate_grid_cells: false
   allow_otsu_threshold_fallback: false
   allow_legacy_loss_keys: false
-  allow_topo_center_separation: false

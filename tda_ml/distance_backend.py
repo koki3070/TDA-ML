@@ -121,7 +121,6 @@ def compute_distance_matrix_batch(
     symmetrize: str,
     backend: str,
     ellphi_differentiable: bool = True,
-    allow_topo_center_separation: bool = False,
 ) -> torch.Tensor:
     """
     Compute batched distance matrices with shape ``(B, N, N)``.
@@ -131,9 +130,6 @@ def compute_distance_matrix_batch(
       - ``ellphi``: tangency distance. If ``ellphi_differentiable=True`` and
         ``ellphi.grad`` is available, gradients flow to centers/covariances.
         Missing grad API is a hard-fail (no NumPy fallback).
-
-    ``allow_topo_center_separation``: when True, nudge coincident ellipse centers
-    by ``TOPO_CENTER_SEPARATION_MIN`` before ellphi (opt-in; default off).
 
     For ``ellphi``, ``probs``-based weighting is currently unsupported and ignored.
     """
@@ -175,8 +171,6 @@ def compute_distance_matrix_batch(
     for i in range(batch_size):
         if use_torch:
             c, cov = ellipse_params_to_centers_cov(points[i], params[i])
-            if allow_topo_center_separation:
-                c = separate_coincident_centers_for_topo(c, TOPO_CENTER_SEPARATION_MIN)
             mats.append(pdist_tangency_matrix_differentiable(c, cov))
         else:
             dm = compute_ellphi_distance_matrix_np(

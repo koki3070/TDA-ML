@@ -47,7 +47,6 @@ class TestReproducibilityConfig(unittest.TestCase):
         self.assertFalse(settings["allow_nan_batch_skip"])
         self.assertFalse(settings["allow_empty_cloud_fallback"])
         self.assertFalse(settings["allow_legacy_loss_keys"])
-        self.assertFalse(settings["allow_topo_center_separation"])
 
     def test_resolve_dbscan_grid_explicit_override(self):
         from tda_ml.config import load_config
