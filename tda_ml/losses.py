@@ -132,21 +132,6 @@ class AnisotropyPenaltyLoss(nn.Module):
             
         return self.weight * loss
 
-class MinBRegularizationLoss(nn.Module):
-    """Penalize minor axis falling below ``target`` (legacy ``lambda_min_b`` / ``min_b_target``)."""
-
-    def __init__(self, weight: float = 0.0, target: float = 0.2):
-        super().__init__()
-        self.weight = weight
-        self.target = target
-
-    def forward(self, params: torch.Tensor) -> torch.Tensor:
-        if self.weight <= 0:
-            return torch.tensor(0.0, device=params.device)
-        axes = params[..., 0:2]
-        minor_axis = axes.min(dim=-1)[0]
-        return self.weight * F.relu(self.target - minor_axis).mean()
-
 class TopologicalLoss(nn.Module):
     """
     Topological loss: Wasserstein-2 squared between predicted and teacher PDs.

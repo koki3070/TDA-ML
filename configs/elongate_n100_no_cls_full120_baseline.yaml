@@ -1,5 +1,4 @@
-# Pure baseline: no fix1 (median), no fix2 (min_b), no fix3 (topo12).
-# Full 120-point cloud for topo loss (default max_points unset).
+# no_cls baseline contrast: full 120-point cloud for topo loss (default max_points unset).
 
 meta:
   config_id: "elongate_n100_no_cls_full120_baseline"

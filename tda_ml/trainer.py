@@ -12,11 +12,10 @@ from tda_ml.reproducibility import (
     reproducibility_settings,
 )
 from tda_ml.losses import (
-    ClassificationLoss, 
-    TopologicalLoss, 
-    SizeRegularizationLoss, 
+    ClassificationLoss,
+    TopologicalLoss,
+    SizeRegularizationLoss,
     AnisotropyPenaltyLoss,
-    MinBRegularizationLoss,
 )
 from tda_ml.metrics import compute_recall_specificity_gmean_mcc
 from tda_ml.visualization import visualize
@@ -98,15 +97,6 @@ class Trainer:
         self.lambda_class = _loss_or_legacy("w_class", "lambda_class", 1.0)
         self.lambda_topo = _loss_or_legacy("w_topo", "lambda_topo", 0.1)
         self.lambda_aniso = _loss_or_legacy("w_aniso", "lambda_aniso", 0.01)
-        if "w_min_b" in loss_cfg:
-            self.lambda_min_b = float(loss_cfg["w_min_b"])
-        elif allow_legacy and "lambda_min_b" in training_cfg:
-            self.lambda_min_b = float(training_cfg["lambda_min_b"])
-        else:
-            self.lambda_min_b = 0.0
-        self.min_b_target = float(
-            loss_cfg.get('min_b_target', training_cfg.get('min_b_target', 0.2))
-        )
         self.topo_loss_max_points = training_cfg.get(
             'topo_loss_max_points', loss_cfg.get('topo_loss_max_points')
         )
@@ -256,16 +246,6 @@ class Trainer:
             mode=self.aniso_mode,
             barrier_threshold=self.aniso_barrier_threshold,
         )
-        self.min_b_loss_fn = MinBRegularizationLoss(
-            weight=self.lambda_min_b,
-            target=self.min_b_target,
-        )
-        if self.lambda_min_b > 0:
-            logger.info(
-                "Min-B regularization: lambda=%s target=%s",
-                self.lambda_min_b,
-                self.min_b_target,
-            )
         if self.topo_loss_max_points is not None:
             logger.info("Topological loss subsampling: max_points=%s", self.topo_loss_max_points)
 
@@ -290,7 +270,6 @@ class Trainer:
         total_topo_loss = 0
         total_aniso_loss = 0
         total_size_loss = 0
-        total_min_b_loss = 0
         steps_completed = 0
 
         all_train_preds = []
@@ -348,13 +327,11 @@ class Trainer:
                 if epoch > self.warmup_epochs:
                     size_loss = self.size_loss_fn(params)
                     aniso_loss = self.aniso_loss_fn(params)
-                    min_b_loss = self.min_b_loss_fn(params)
                 else:
                     size_loss = torch.tensor(0.0, device=self.device)
                     aniso_loss = torch.tensor(0.0, device=self.device)
-                    min_b_loss = torch.tensor(0.0, device=self.device)
 
-                loss = topo_loss + aniso_loss + size_loss + min_b_loss
+                loss = topo_loss + aniso_loss + size_loss
                 if self.lambda_class > 0:
                     loss = loss + self.lambda_class * class_loss
 
@@ -393,14 +370,19 @@ class Trainer:
             total_topo_loss += topo_loss.item()
             total_aniso_loss += aniso_loss.item()
             total_size_loss += size_loss.item()
-            total_min_b_loss += min_b_loss.item()
-            
+
             probs = torch.sigmoid(logits).squeeze(-1)
             preds = (probs > self.threshold).long()
             all_train_preds.extend(preds.cpu().numpy().flatten())
             all_train_labels.extend(labels.cpu().numpy().flatten())
 
-            pbar.set_postfix(loss=f"{loss.item():.4f}", cls=f"{class_loss.item():.4f}", topo=f"{topo_loss.item():.4f}", aniso=f"{aniso_loss.item():.4f}", size=f"{size_loss.item():.4f}", min_b=f"{min_b_loss.item():.4f}")
+            pbar.set_postfix(
+                loss=f"{loss.item():.4f}",
+                cls=f"{class_loss.item():.4f}",
+                topo=f"{topo_loss.item():.4f}",
+                aniso=f"{aniso_loss.item():.4f}",
+                size=f"{size_loss.item():.4f}",
+            )
             if i % 10 == 0:
                 logger.debug(
                     "Step %s: loss=%.4f class=%.4f topo=%.4f aniso=%.4f size=%.4f",

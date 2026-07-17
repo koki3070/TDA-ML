@@ -146,20 +146,7 @@ class TestTopoEpsScale(unittest.TestCase):
         self.assertTrue(torch.isfinite(d).all())
 
 
-class TestMinBAndTopoSubsampling(unittest.TestCase):
-    def test_min_b_penalizes_small_minor_axis(self):
-        from tda_ml.losses import MinBRegularizationLoss
-        loss_fn = MinBRegularizationLoss(weight=1.0, target=0.5)
-        params = torch.tensor([[[0.8, 0.1, 0.0], [0.6, 0.4, 0.0]]])
-        loss = loss_fn(params)
-        self.assertGreater(loss.item(), 0.0)
-
-    def test_min_b_zero_weight_is_noop(self):
-        from tda_ml.losses import MinBRegularizationLoss
-        loss_fn = MinBRegularizationLoss(weight=0.0, target=0.5)
-        params = torch.tensor([[[0.8, 0.1, 0.0]]])
-        self.assertEqual(loss_fn(params).item(), 0.0)
-
+class TestTopoSubsampling(unittest.TestCase):
     def test_topo_max_points_subsamples(self):
         from tda_ml.losses import TopologicalLoss
         torch.manual_seed(0)

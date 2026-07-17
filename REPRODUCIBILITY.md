@@ -11,7 +11,7 @@
 
 **論文主表の提案:** W-Dist tune 重みの 30ep 5-seed（`run_teacher_local_pca_power_30ep_multiseed.sh wdist`）。
 **主張:** Euclidean DBSCAN / ADBSCAN と **同程度の外れ値除去性能**（MCC / G-Mean）。主表に Topo W. 列は載せない。
-**正本 config:** `elongate_n100_no_cls_full120_teacher_local_pca`（`w_class=0`, `homology_dimensions=[1]`, `aniso_mode=elongate`, 軸投影・`min_b` 床なし）。
+**正本 config:** `elongate_n100_no_cls_full120_teacher_local_pca`（`w_class=0`, `homology_dimensions=[1]`, `aniso_mode=elongate`）。
 出力先は `WDIST_OUT` / `MCC_OUT` / `LOG_ROOT`（既定: `outputs/supervised/pwr30_*`）で明示する（生成物は git に含めない）。
 
 | 区分 | パス |
@@ -181,7 +181,7 @@ M_i=\max(a_i,b_i),\; m_i=\min(a_i,b_i).
 
 主表 power 30ep config（`elongate_n100_no_cls_full120_teacher_local_pca`）では
 `homology_dimensions: [1]`（H1-only Wasserstein）と `aniso_mode: elongate` を用いる。
-ellphi 退化（NaN 共分散・接線距離未定義など）は **軸投影や min_b 床で隠さず**
+ellphi 退化（NaN 共分散・接線距離未定義など）は
 `run_status: failed` とする（[Computational Reproducibility skill](https://github.com/t-uda/skills/blob/main/skills/computational-reproducibility/SKILL.md)）。
 
 別 ablation では `aniso_mode: linear` により
