@@ -75,7 +75,7 @@ EOF
 BASE_CONFIG="${BASE_CONFIG}" \
 OUT_BASE="${STAGE1_OUT}" \
 STUDY_NAME="${STAGE1_STUDY}" \
-THREADS_PER_WORKER=4 \
+THREADS_PER_WORKER="${STAGE1_THREADS:-12}" \
 TRIALS_PER_WORKER=2 \
 bash experiments/run_tune_local_pca_power_wdist_parallel.sh 8 16 5 ellphi
 
@@ -90,7 +90,7 @@ uv run python -u experiments/enqueue_top_optuna_trials.py \
 BASE_CONFIG="${BASE_CONFIG}" \
 OUT_BASE="${STAGE2_OUT}" \
 STUDY_NAME="${STAGE2_STUDY}" \
-THREADS_PER_WORKER=4 \
+THREADS_PER_WORKER="${STAGE2_THREADS:-24}" \
 TRIALS_PER_WORKER=1 \
 bash experiments/run_tune_local_pca_power_wdist_parallel.sh 4 4 20 ellphi
 
