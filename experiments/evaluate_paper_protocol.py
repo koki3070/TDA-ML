@@ -174,7 +174,13 @@ def build_split_loader(config: dict[str, Any], split: str, device: torch.device)
         outlier_mode=outlier_mode,
     )
     if outlier_mode == "local_pca_tangent":
-        for key in ("tangent_pca_k", "tangent_offset_min", "tangent_offset_max"):
+        for key in (
+            "tangent_pca_k",
+            "tangent_offset_min",
+            "tangent_offset_max",
+            "tangent_angle_jitter_deg",
+            "tangent_stroke_clearance",
+        ):
             if key not in data_cfg:
                 raise ValueError(
                     f"data.{key} must be set explicitly for outlier_mode=local_pca_tangent"
@@ -183,6 +189,8 @@ def build_split_loader(config: dict[str, Any], split: str, device: torch.device)
             tangent_pca_k=int(data_cfg["tangent_pca_k"]),
             tangent_offset_min=float(data_cfg["tangent_offset_min"]),
             tangent_offset_max=float(data_cfg["tangent_offset_max"]),
+            tangent_angle_jitter_deg=float(data_cfg["tangent_angle_jitter_deg"]),
+            tangent_stroke_clearance=float(data_cfg["tangent_stroke_clearance"]),
         )
     dataset = NoisyMNISTDataset(**dataset_kwargs)
     loader = create_data_loader(

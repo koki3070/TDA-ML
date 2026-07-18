@@ -28,11 +28,16 @@ class NoisyMNISTDataset(Dataset):
         indices (torch.Tensor, optional): Explicit index subset to use.
         noise_seed (int): Base seed for deterministic noise generation.
         outlier_mode (str): ``uniform`` (``[-1,1]^2``) or ``local_pca_tangent``
-            (displace along local PCA PC1 of the clean inliers).
+            (displace along/near local PCA PC1 of the clean inliers).
         tangent_pca_k (int): Neighbor count for local PCA when
             ``outlier_mode=local_pca_tangent``.
         tangent_offset_min / tangent_offset_max (float): Displacement magnitude
             range along PC1 (normalized coordinates).
+        tangent_angle_jitter_deg (float): Half-width of the uniform angular cone
+            around PC1 for the displacement direction (0 = exact tangent).
+        tangent_stroke_clearance (float): Semantic floor on the distance from an
+            outlier to every clean inlier; candidates landing back on the stroke
+            are rejected and retried (0 = disabled).
 
     Returns (per item):
         data (Tensor): Shape (max_points + num_outliers, 2). Shuffled point cloud.
@@ -48,7 +53,9 @@ class NoisyMNISTDataset(Dataset):
                  outlier_mode="uniform",
                  tangent_pca_k=10,
                  tangent_offset_min=0.15,
-                 tangent_offset_max=0.40):
+                 tangent_offset_max=0.40,
+                 tangent_angle_jitter_deg=0.0,
+                 tangent_stroke_clearance=0.0):
         self.max_points = max_points
         self.num_outliers = num_outliers
         self.noise_std = noise_std
@@ -66,6 +73,8 @@ class NoisyMNISTDataset(Dataset):
         self.tangent_pca_k = int(tangent_pca_k)
         self.tangent_offset_min = float(tangent_offset_min)
         self.tangent_offset_max = float(tangent_offset_max)
+        self.tangent_angle_jitter_deg = float(tangent_angle_jitter_deg)
+        self.tangent_stroke_clearance = float(tangent_stroke_clearance)
 
         full_dataset = datasets.MNIST(root, train=train, download=True)
 
@@ -206,6 +215,12 @@ class NoisyMNISTDataset(Dataset):
                     offset_max=self.tangent_offset_max,
                     generator=rng,
                     existing_points=inliers,
+                    angle_jitter_deg=self.tangent_angle_jitter_deg,
+                    stroke_clearance=self.tangent_stroke_clearance,
+                    # Stroke-clearance rejection lowers per-attempt acceptance on
+                    # straight strokes; give the sampler more retries before the
+                    # hard-fail.
+                    max_attempts=400,
                 )
         else:
             outliers = torch.empty(0, 2)

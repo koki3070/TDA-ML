@@ -1,10 +1,13 @@
-# H1-only tune on tangent-direction outliers.
-# Same stack as elongate_n100_no_cls_tune_local_pca_ellphi_power_h1 (local-PCA
-# teacher + ellphi + power size, W-Dist over H1 only), but outliers are placed
-# along local-PCA first principal axes (anisotropic noise) instead of uniform.
+# H1-only tune on NEAR-tangent outliers (GT-proximal anisotropic noise).
+# Same stack as elongate_n100_no_cls_tune_local_pca_ellphi_power_h1_tangent, but
+# the displacement direction gets a ±30° jitter cone around local-PCA PC1 and a
+# semantic stroke clearance of 0.08 (> median inlier NN spacing 0.064) rejects
+# candidates landing back on the digit. Pure-tangent displacement follows the
+# stroke, so >50% of those outliers were geometrically indistinguishable from
+# inliers; near-tangent keeps the anisotropy while making the labels sound.
 
 meta:
-  config_id: "elongate_n100_no_cls_tune_local_pca_ellphi_power_h1_tangent"
+  config_id: "elongate_n100_no_cls_tune_local_pca_ellphi_power_h1_neartangent"
 
 model:
   point_dim: 2
@@ -48,19 +51,17 @@ training:
 data:
   max_points: 100
   num_outliers: 20
-  # Anisotropic outliers: displace inliers along local-PCA PC1 (tangent).
-  # noise_std matches the uniform baseline: inliers get the same isotropic jitter
-  # so only the OUTLIER distribution differs (tangent = anisotropic). Jitter also
-  # breaks exact MNIST-quantized coincidences (dmin=0) that make the ellphi
-  # tangency derivative w.r.t. mu undefined.
+  # GT-proximal anisotropic outliers: displace inliers within a ±30° cone
+  # around local-PCA PC1, rejected until >=0.08 from every clean inlier.
+  # noise_std matches the uniform baseline: inliers get the same isotropic
+  # jitter so only the OUTLIER distribution differs.
   outlier_mode: local_pca_tangent
   noise_std: 0.01
   tangent_pca_k: 10
   tangent_offset_min: 0.15
   tangent_offset_max: 0.40
-  # Pure tangent (no direction jitter, no semantic stroke clearance).
-  tangent_angle_jitter_deg: 0.0
-  tangent_stroke_clearance: 0.0
+  tangent_angle_jitter_deg: 30.0
+  tangent_stroke_clearance: 0.08
   seed: 42
   train_size: 4500
   val_size: 500

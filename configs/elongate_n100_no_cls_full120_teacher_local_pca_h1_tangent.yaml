@@ -60,6 +60,9 @@ data:
   tangent_pca_k: 10
   tangent_offset_min: 0.15
   tangent_offset_max: 0.40
+  # Pure tangent (no direction jitter, no semantic stroke clearance).
+  tangent_angle_jitter_deg: 0.0
+  tangent_stroke_clearance: 0.0
   seed: 42
   train_size: 4500
   val_size: 500
