@@ -42,10 +42,12 @@ from experiments.evaluate_paper_protocol import (
     _valid_clean_inliers,
     build_split_loader,
     dbscan_labels_to_outlier_pred,
-    evaluate_cloud_dbscan,
 )
 from tda_ml.config import deep_update, load_config
-from tda_ml.metrics import compute_recall_specificity_gmean_mcc_wdist
+from tda_ml.metrics import (
+    compute_recall_specificity_gmean_mcc,
+    compute_recall_specificity_gmean_mcc_wdist,
+)
 from tda_ml.numerical_eps import EIGENVALUE_FLOOR, PCA_RIDGE_EPS
 from tda_ml.preflight import preflight_baseline_eval
 from tda_ml.reproducibility import (
@@ -56,6 +58,11 @@ from tda_ml.reproducibility import (
     write_json,
 )
 from tda_ml.supervised_diagnostics import git_revision
+from tda_ml.topo_wdist import (
+    TopoWdistOptions,
+    compute_topo_wdist,
+    topo_wdist_options_from_config,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PAPER_SEEDS = [42, 123, 456, 789, 1024]
@@ -205,18 +212,41 @@ def evaluate_adbscan(
     *,
     eps: float,
     min_samples: int,
+    topo_options: TopoWdistOptions | None = None,
 ) -> CloudMetrics:
+    """
+    ADBSCAN baseline metrics for one cloud.
+
+    ``topo_options=None`` is the val grid-search phase: selection uses MCC only,
+    and the ellipse-filtration topo W-Dist does not depend on (eps, min_samples),
+    so it is deliberately NOT computed there (wdist=NaN placeholder, never
+    aggregated into results). The test phase passes explicit ``topo_options``
+    and reports the real W-Dist.
+    """
+    from tda_ml.dbscan import apply_anisotropic_dbscan
+
     if cloud.adbscan_params is None:
         raise ValueError("adbscan_params missing")
-    return evaluate_cloud_dbscan(
+    db_labels = apply_anisotropic_dbscan(
         cloud.points,
         cloud.adbscan_params,
-        cloud.labels_gt,
-        cloud.clean_pc,
         eps=eps,
         min_samples=min_samples,
+        metric="max",
         backend="mahalanobis",
     )
+    pred = dbscan_labels_to_outlier_pred(db_labels)
+    recall, specificity, gmean, mcc = compute_recall_specificity_gmean_mcc(
+        cloud.labels_gt, pred
+    )
+    if topo_options is None:
+        return CloudMetrics(recall, specificity, gmean, mcc, float("nan"))
+    wdist = float(
+        compute_topo_wdist(
+            cloud.points, cloud.adbscan_params, cloud.clean_pc, topo_options
+        )
+    )
+    return CloudMetrics(recall, specificity, gmean, mcc, wdist)
 
 
 def grid_search_clouds(
@@ -360,12 +390,17 @@ def evaluate_method_on_seed(
             manifest_ref=manifest_ref,
         )
         test_fn = evaluate_adbscan
+        # Real ellipse-filtration W-Dist only on test (grid phase selects by MCC).
+        test_extra_kwargs = {"topo_options": topo_wdist_options_from_config(config)}
     else:
         raise ValueError(f"Unknown method: {method!r}")
 
+    if method != "adbscan":
+        test_extra_kwargs = {}
+
     per_test: list[CloudMetrics] = []
     for cloud in test_clouds:
-        per_test.append(test_fn(cloud, **best_params))
+        per_test.append(test_fn(cloud, **best_params, **test_extra_kwargs))
     recall, specificity, gmean, mcc, wdist = _aggregate_cloud_metrics(per_test)
 
     return SeedResult(
