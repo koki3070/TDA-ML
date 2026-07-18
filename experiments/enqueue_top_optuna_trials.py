@@ -45,7 +45,7 @@ def main() -> int:
         raise ValueError(f"top-k must be >= 1, got {args.top_k}")
     if args.rank_start < 1:
         raise ValueError(f"rank-start must be >= 1, got {args.rank_start}")
-    if args.out_dir.exists():
+    if args.out_dir.exists() and not args.append_existing:
         raise FileExistsError(f"Refinement output already exists: {args.out_dir}")
 
     source = optuna.load_study(
@@ -71,7 +71,7 @@ def main() -> int:
                 f"Source trial {trial.number} is missing parameters {missing}"
             )
 
-    args.out_dir.mkdir(parents=True)
+    args.out_dir.mkdir(parents=True, exist_ok=args.append_existing)
     target = optuna.create_study(
         study_name=args.target_study,
         storage=args.target_storage,
@@ -114,7 +114,15 @@ def main() -> int:
         ],
         "fallbacks": [],
     }
-    (args.out_dir / "REFINEMENT_PREFLIGHT.json").write_text(
+    if args.append_existing:
+        # Recovery append: keep the original preflight intact for provenance.
+        preflight_name = f"REFINEMENT_PREFLIGHT_rank{args.rank_start}-{rank_stop}.json"
+    else:
+        preflight_name = "REFINEMENT_PREFLIGHT.json"
+    preflight_path = args.out_dir / preflight_name
+    if preflight_path.exists():
+        raise FileExistsError(f"Refinement preflight already exists: {preflight_path}")
+    preflight_path.write_text(
         json.dumps(manifest, indent=2) + "\n",
         encoding="utf-8",
     )
