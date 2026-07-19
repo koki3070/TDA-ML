@@ -61,6 +61,7 @@ data:
   # Pure tangent (no direction jitter, no semantic stroke clearance).
   tangent_angle_jitter_deg: 0.0
   tangent_stroke_clearance: 0.0
+  tangent_direction: tangent
   seed: 42
   train_size: 4500
   val_size: 500

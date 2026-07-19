@@ -38,6 +38,9 @@ class NoisyMNISTDataset(Dataset):
         tangent_stroke_clearance (float): Semantic floor on the distance from an
             outlier to every clean inlier; candidates landing back on the stroke
             are rejected and retried (0 = disabled).
+        tangent_direction (str): Base axis for the displacement: ``tangent``
+            (local PCA major axis, along the stroke) or ``normal`` (minor axis,
+            across the stroke).
 
     Returns (per item):
         data (Tensor): Shape (max_points + num_outliers, 2). Shuffled point cloud.
@@ -55,7 +58,8 @@ class NoisyMNISTDataset(Dataset):
                  tangent_offset_min=0.15,
                  tangent_offset_max=0.40,
                  tangent_angle_jitter_deg=0.0,
-                 tangent_stroke_clearance=0.0):
+                 tangent_stroke_clearance=0.0,
+                 tangent_direction="tangent"):
         self.max_points = max_points
         self.num_outliers = num_outliers
         self.noise_std = noise_std
@@ -75,6 +79,12 @@ class NoisyMNISTDataset(Dataset):
         self.tangent_offset_max = float(tangent_offset_max)
         self.tangent_angle_jitter_deg = float(tangent_angle_jitter_deg)
         self.tangent_stroke_clearance = float(tangent_stroke_clearance)
+        tangent_direction = str(tangent_direction).strip().lower()
+        if tangent_direction not in ("tangent", "normal"):
+            raise ValueError(
+                f"tangent_direction must be 'tangent' or 'normal', got {tangent_direction!r}"
+            )
+        self.tangent_direction = tangent_direction
 
         full_dataset = datasets.MNIST(root, train=train, download=True)
 
@@ -217,6 +227,7 @@ class NoisyMNISTDataset(Dataset):
                     existing_points=inliers,
                     angle_jitter_deg=self.tangent_angle_jitter_deg,
                     stroke_clearance=self.tangent_stroke_clearance,
+                    direction=self.tangent_direction,
                     # Stroke-clearance rejection lowers per-attempt acceptance on
                     # straight strokes; give the sampler more retries before the
                     # hard-fail.

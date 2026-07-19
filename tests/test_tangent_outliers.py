@@ -91,6 +91,55 @@ class TestTangentOutliers(unittest.TestCase):
         with self.assertRaises(ValueError):
             sample_local_pca_tangent_outliers(inliers, 5, stroke_clearance=-0.1)
 
+    def test_normal_direction_is_perpendicular(self):
+        # Horizontal line -> PC1 along x; direction="normal" must displace
+        # along y (across the stroke), i.e. |dy| >> |dx| for every outlier.
+        g = torch.Generator().manual_seed(9)
+        inliers = torch.stack(
+            [torch.linspace(-0.5, 0.5, 40), torch.zeros(40)], dim=1
+        )
+        outliers = sample_local_pca_tangent_outliers(
+            inliers, 10, k=8, offset_min=0.10, offset_max=0.25,
+            generator=g, direction="normal",
+        )
+        # Displacement from the nearest inlier is essentially the offset vector.
+        d = torch.cdist(outliers, inliers)
+        nearest = inliers[d.argmin(dim=1)]
+        disp = outliers - nearest
+        self.assertTrue(torch.all(disp[:, 1].abs() > disp[:, 0].abs()).item())
+        self.assertTrue(torch.all(disp[:, 1].abs() >= 0.05).item())
+
+    def test_normal_direction_with_jitter_and_clearance(self):
+        g = torch.Generator().manual_seed(13)
+        inliers = torch.stack(
+            [torch.linspace(-0.5, 0.5, 40), torch.zeros(40)], dim=1
+        )
+        clearance = 0.08
+        outliers = sample_local_pca_tangent_outliers(
+            inliers, 12, k=8, offset_min=0.10, offset_max=0.25,
+            generator=g, angle_jitter_deg=30.0, stroke_clearance=clearance,
+            direction="normal", max_attempts=400,
+        )
+        self.assertEqual(tuple(outliers.shape), (12, 2))
+        d_inl = torch.cdist(outliers, inliers).min()
+        self.assertGreaterEqual(float(d_inl), clearance)
+
+    def test_tangent_default_stream_unchanged_by_direction_arg(self):
+        # direction="tangent" (explicit) must match the historical default.
+        inliers = torch.randn(30, 2)
+        g1 = torch.Generator().manual_seed(17)
+        g2 = torch.Generator().manual_seed(17)
+        a = sample_local_pca_tangent_outliers(inliers, 5, generator=g1)
+        b = sample_local_pca_tangent_outliers(
+            inliers, 5, generator=g2, direction="tangent"
+        )
+        self.assertTrue(torch.equal(a, b))
+
+    def test_invalid_direction_rejected(self):
+        inliers = torch.randn(30, 2)
+        with self.assertRaises(ValueError):
+            sample_local_pca_tangent_outliers(inliers, 5, direction="diagonal")
+
     def test_min_separation_unsatisfiable_hard_fails(self):
         # A tiny box with a large min_separation cannot be satisfied -> hard-fail
         # rather than emitting near-coincident (degenerate) outliers.

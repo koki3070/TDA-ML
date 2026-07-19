@@ -1,4 +1,4 @@
-"""Place outliers along (or near) local-PCA first principal axes (tangent directions)."""
+"""Place outliers along (or near) local-PCA principal axes (tangent or normal directions)."""
 
 from __future__ import annotations
 
@@ -25,15 +25,22 @@ def sample_local_pca_tangent_outliers(
     existing_points: torch.Tensor | None = None,
     angle_jitter_deg: float = 0.0,
     stroke_clearance: float = 0.0,
+    direction: str = "tangent",
 ) -> torch.Tensor:
     """
-    Sample outliers by displacing random inliers along (or near) local PCA PC1.
+    Sample outliers by displacing random inliers along (or near) a local PCA axis.
 
     Local PCA is computed on ``inliers`` only (no isotropic jitter). Each outlier
     is ``p + s * u`` where ``u = (cos φ, sin φ)`` with ``φ = θ + Uniform(-j, j)``,
-    ``θ`` the major-axis direction at a randomly chosen inlier ``p``, ``j`` the
-    ``angle_jitter_deg`` cone (0 → exact tangent), and ``s`` has random sign with
+    ``θ`` the base-axis direction at a randomly chosen inlier ``p``, ``j`` the
+    ``angle_jitter_deg`` cone (0 → exact axis), and ``s`` has random sign with
     ``|s| ~ Uniform(offset_min, offset_max)``.
+
+    ``direction`` selects the base axis: ``"tangent"`` uses the local PCA major
+    axis (PC1, along the stroke); ``"normal"`` uses the minor axis (PC1 + 90°,
+    across the stroke). Normal-direction outliers sit close to the stroke in
+    Euclidean distance but off the tangent line — the adversarial case for
+    isotropic clustering and the favourable case for anisotropic ellipses.
 
     Rejection rules (candidates are retried, never clipped or merged):
 
@@ -68,6 +75,10 @@ def sample_local_pca_tangent_outliers(
         )
     if stroke_clearance < 0:
         raise ValueError(f"stroke_clearance must be >= 0; got {stroke_clearance}")
+    if direction not in ("tangent", "normal"):
+        raise ValueError(
+            f"direction must be 'tangent' or 'normal'; got {direction!r}"
+        )
     sep_ref = inliers if existing_points is None else existing_points
     if sep_ref.ndim != 2 or sep_ref.shape[-1] != 2:
         raise ValueError(
@@ -76,7 +87,9 @@ def sample_local_pca_tangent_outliers(
 
     params = local_pca_ellipse_params(inliers, k=k, normalize_axes=True)  # (N, 3)
     theta = params[:, 2]
-    direction = torch.stack([torch.cos(theta), torch.sin(theta)], dim=-1)
+    if direction == "normal":
+        theta = theta + math.pi / 2
+    axis_dirs = torch.stack([torch.cos(theta), torch.sin(theta)], dim=-1)
 
     jitter_rad = math.radians(angle_jitter_deg)
     outliers = torch.empty(num_outliers, 2, dtype=inliers.dtype, device=inliers.device)
@@ -104,7 +117,7 @@ def sample_local_pca_tangent_outliers(
                     device=inliers.device,
                 )
             else:
-                direction_j = direction[idx]
+                direction_j = axis_dirs[idx]
             mag = offset_min + (offset_max - offset_min) * u
             cand = inliers[idx] + (sign * mag) * direction_j
             if not bool(torch.all((cand >= box_min) & (cand <= box_max)).item()):
@@ -131,6 +144,7 @@ def sample_local_pca_tangent_outliers(
                 f"offset=[{offset_min}, {offset_max}], "
                 f"min_separation={min_separation}, "
                 f"angle_jitter_deg={angle_jitter_deg}, "
-                f"stroke_clearance={stroke_clearance})."
+                f"stroke_clearance={stroke_clearance}, "
+                f"direction={direction})."
             )
     return outliers

@@ -64,6 +64,7 @@ data:
   tangent_offset_max: 0.40
   tangent_angle_jitter_deg: 30.0
   tangent_stroke_clearance: 0.08
+  tangent_direction: tangent
   seed: 42
   train_size: 4500
   val_size: 500

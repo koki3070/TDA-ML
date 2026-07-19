@@ -115,6 +115,7 @@ def main(config_name=None, config=None, trial=None, config_overrides=None):
                 "tangent_offset_max",
                 "tangent_angle_jitter_deg",
                 "tangent_stroke_clearance",
+                "tangent_direction",
             ):
                 if key not in data_cfg:
                     raise ValueError(
@@ -126,6 +127,7 @@ def main(config_name=None, config=None, trial=None, config_overrides=None):
                 tangent_offset_max=float(data_cfg["tangent_offset_max"]),
                 tangent_angle_jitter_deg=float(data_cfg["tangent_angle_jitter_deg"]),
                 tangent_stroke_clearance=float(data_cfg["tangent_stroke_clearance"]),
+                tangent_direction=str(data_cfg["tangent_direction"]),
             )
         manifest = {
             "timestamp_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),

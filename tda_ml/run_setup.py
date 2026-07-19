@@ -126,6 +126,7 @@ def build_dataloaders(config, seed: int, settings: DataLoaderSettings):
             "tangent_offset_max",
             "tangent_angle_jitter_deg",
             "tangent_stroke_clearance",
+            "tangent_direction",
         ):
             if key not in data_cfg:
                 raise ValueError(
@@ -137,6 +138,7 @@ def build_dataloaders(config, seed: int, settings: DataLoaderSettings):
             tangent_offset_max=float(data_cfg["tangent_offset_max"]),
             tangent_angle_jitter_deg=float(data_cfg["tangent_angle_jitter_deg"]),
             tangent_stroke_clearance=float(data_cfg["tangent_stroke_clearance"]),
+            tangent_direction=str(data_cfg["tangent_direction"]),
         )
 
     train_dataset = NoisyMNISTDataset(train=True, indices=train_indices, **dataset_kwargs)
