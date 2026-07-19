@@ -47,6 +47,8 @@ LOG_ROOT="${LOG_ROOT:-outputs/supervised/pwr30_multiseed}"
 EPOCHS="${EPOCHS:-30}"
 DBSCAN_BACKEND="${DBSCAN_BACKEND:-mahalanobis}"
 BASE_CONFIG="${BASE_CONFIG:-elongate_n100_no_cls_full120_teacher_local_pca}"
+# Declared paper contract variant the tune JSONs must match (elongate | elongate_barrier).
+ANISO_VARIANT="${ANISO_VARIANT:-elongate}"
 
 mkdir -p "${LOG_ROOT}"
 
@@ -190,6 +192,7 @@ AGG_ARGS=(
   --mcc-tune-json "${MCC_JSON}"
   --out-dir "${LOG_ROOT}"
   --seeds "${SEEDS[@]}"
+  --aniso-variant "${ANISO_VARIANT}"
 )
 case "${MODE}" in
   wdist) AGG_ARGS+=(--methods wdist) ;;
