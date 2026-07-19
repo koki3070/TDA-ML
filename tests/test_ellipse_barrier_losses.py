@@ -43,6 +43,27 @@ class TestEllipseBarrierLosses(unittest.TestCase):
         bad = torch.tensor([[[6.0, 1.0, 0.0]]])  # ratio=6
         self.assertLess(float(loss_fn(ok).item()), float(loss_fn(bad).item()))
 
+    def test_elongate_barrier_gradient_recovers_needle(self):
+        # Degeneracy guard: for needle geometry (aspect >> T) the barrier must
+        # dominate the elongate reward and push the minor axis back up.
+        loss_fn = AnisotropyPenaltyLoss(
+            weight=1.0, mode="elongate_barrier", barrier_threshold=6.0
+        )
+        needle = torch.tensor([[[0.35, 1e-4, 0.0]]], requires_grad=True)  # ratio 3500
+        loss_fn(needle).backward()
+        grad_minor = needle.grad[0, 0, 1].item()
+        # descending the loss must increase the minor axis
+        self.assertLess(grad_minor, 0.0)
+
+    def test_plain_elongate_gradient_shrinks_minor_axis(self):
+        # Documents the failure mode motivating the barrier: plain elongate always
+        # rewards minor/major -> 0.
+        loss_fn = AnisotropyPenaltyLoss(weight=1.0, mode="elongate")
+        needle = torch.tensor([[[0.35, 1e-4, 0.0]]], requires_grad=True)
+        loss_fn(needle).backward()
+        grad_minor = needle.grad[0, 0, 1].item()
+        self.assertGreater(grad_minor, 0.0)
+
     def test_size_power_small_gradient_at_small_scale(self):
         ref = 1.34
         loss_fn = SizeRegularizationLoss(

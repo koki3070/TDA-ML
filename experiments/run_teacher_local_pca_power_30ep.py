@@ -17,6 +17,7 @@ from tda_ml.main import main as train_main  # noqa: E402
 from tda_ml.preflight import (  # noqa: E402
     assert_paper_no_cls_contract,
     classify_tune_objective,
+    paper_aniso_fields,
     preflight_tune_production_run,
 )
 
@@ -132,6 +133,7 @@ def main() -> int:
     size_ref = tune_weights["size_ref"]
     size_power = tune_weights["size_power"]
 
+    aniso_fields = paper_aniso_fields(cfg)
     preflight_tune_production_run(
         base_config=args.base_config,
         tune_json=tune_json,
@@ -140,7 +142,7 @@ def main() -> int:
         preflight_filename=f"RUN_PREFLIGHT_s{args.seed}.json",
         config_overrides={
             "loss": {
-                "aniso_mode": "elongate",
+                **aniso_fields,
                 "size_mode": "power",
                 "size_ref": size_ref,
                 "size_power": size_power,
@@ -159,7 +161,7 @@ def main() -> int:
     )
 
     loss_overrides: dict = {
-        "aniso_mode": "elongate",
+        **aniso_fields,
         "size_mode": "power",
         "size_ref": size_ref,
         "size_power": size_power,
@@ -208,6 +210,7 @@ def main() -> int:
         "tune_json": tune_source,
         "dbscan_backend": args.dbscan_backend,
         "aniso_mode": cfg["loss"]["aniso_mode"],
+        "aniso_barrier_threshold": aniso_fields.get("aniso_barrier_threshold"),
         "homology_dimensions": cfg["model"]["topology_loss"]["homology_dimensions"],
         "paper_no_cls_contract": paper_contract,
         "protocol_note": (
@@ -232,6 +235,7 @@ def main() -> int:
             "w_aniso": purpose["weights"]["w_aniso"],
             "w_size": purpose["weights"]["w_size"],
             "aniso_mode": purpose.get("aniso_mode"),
+            "aniso_barrier_threshold": purpose.get("aniso_barrier_threshold"),
             "homology_dimensions": purpose.get("homology_dimensions"),
         },
     }

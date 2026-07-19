@@ -322,6 +322,7 @@ def load_run_config(run_dir: Path, base_config: str, seed: int | None) -> dict[s
                 key: loss_overrides[key]
                 for key in (
                     "aniso_mode",
+                    "aniso_barrier_threshold",
                     "size_mode",
                     "size_ref",
                     "size_power",
@@ -329,7 +330,7 @@ def load_run_config(run_dir: Path, base_config: str, seed: int | None) -> dict[s
                     "w_aniso",
                     "w_size",
                 )
-                if key in loss_overrides
+                if key in loss_overrides and loss_overrides[key] is not None
             }
             patch: dict[str, Any] = {}
             if loss_patch:

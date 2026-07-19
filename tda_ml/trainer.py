@@ -113,6 +113,15 @@ class Trainer:
                 "loss.aniso_mode must be set explicitly; refusing silent linear default"
             )
         self.aniso_mode = str(aniso_raw).strip().lower()
+        if self.aniso_mode in ("barrier", "elongate_barrier"):
+            if (
+                "aniso_barrier_threshold" not in loss_cfg
+                and "barrier_threshold" not in training_cfg
+            ):
+                raise ValueError(
+                    "loss.aniso_barrier_threshold must be set explicitly for "
+                    f"aniso_mode={self.aniso_mode!r}; refusing silent 6.0 default"
+                )
         self.aniso_barrier_threshold = float(
             loss_cfg.get(
                 "aniso_barrier_threshold",

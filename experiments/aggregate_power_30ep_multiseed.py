@@ -11,7 +11,11 @@ from typing import Any, Sequence
 
 import numpy as np
 
-from tda_ml.preflight import PAPER_NO_CLS_CONTRACT, preflight_tune_json
+from tda_ml.preflight import (
+    PAPER_NO_CLS_BARRIER_CONTRACT,
+    PAPER_NO_CLS_CONTRACT,
+    preflight_tune_json,
+)
 from tda_ml.supervised_diagnostics import git_revision
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -166,11 +170,25 @@ def parse_args() -> argparse.Namespace:
         default=["wdist", "mcc"],
         help="Which tune objectives to aggregate (single-mode drivers pass one).",
     )
+    p.add_argument(
+        "--aniso-variant",
+        choices=["elongate", "elongate_barrier"],
+        default="elongate",
+        help=(
+            "Declared paper contract variant the tune JSONs must match "
+            "(elongate_barrier = degeneracy-guard stack)."
+        ),
+    )
     return p.parse_args()
 
 
 def main() -> int:
     args = parse_args()
+    expected_contract = (
+        PAPER_NO_CLS_BARRIER_CONTRACT
+        if args.aniso_variant == "elongate_barrier"
+        else PAPER_NO_CLS_CONTRACT
+    )
     tune_paths = {
         "wdist": Path(args.wdist_tune_json),
         "mcc": Path(args.mcc_tune_json),
@@ -179,7 +197,7 @@ def main() -> int:
         path = tune_paths[key]
         if not path.is_absolute():
             path = REPO_ROOT / path
-        preflight_tune_json(path, expected_contract=PAPER_NO_CLS_CONTRACT)
+        preflight_tune_json(path, expected_contract=expected_contract)
         tune_paths[key] = path.resolve()
 
     wdist_by_seed = discover_seed_metrics(
@@ -219,7 +237,7 @@ def main() -> int:
         "mcc_out": str(args.mcc_out),
         "wdist_tune_json": str(tune_paths["wdist"]),
         "mcc_tune_json": str(tune_paths["mcc"]),
-        "paper_no_cls_contract": PAPER_NO_CLS_CONTRACT,
+        "paper_no_cls_contract": expected_contract,
         "per_seed": {
             "wdist": wdist_by_seed,
             "mcc": mcc_by_seed,

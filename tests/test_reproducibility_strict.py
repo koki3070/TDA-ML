@@ -225,6 +225,52 @@ class TestPaperNoClsContract(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "contract mismatch"):
             assert_paper_no_cls_contract(config)
 
+    def test_barrier_variant_passes_with_explicit_threshold(self):
+        from tda_ml.preflight import (
+            PAPER_NO_CLS_BARRIER_CONTRACT,
+            assert_paper_no_cls_contract,
+        )
+
+        config = self._valid_config()
+        config["loss"]["aniso_mode"] = "elongate_barrier"
+        config["loss"]["aniso_barrier_threshold"] = 6.0
+        self.assertEqual(
+            assert_paper_no_cls_contract(config),
+            PAPER_NO_CLS_BARRIER_CONTRACT,
+        )
+
+    def test_barrier_variant_without_threshold_raises(self):
+        from tda_ml.preflight import assert_paper_no_cls_contract
+
+        config = self._valid_config()
+        config["loss"]["aniso_mode"] = "elongate_barrier"
+        with self.assertRaisesRegex(ValueError, "aniso_barrier_threshold"):
+            assert_paper_no_cls_contract(config)
+
+    def test_barrier_variant_wrong_threshold_raises(self):
+        from tda_ml.preflight import assert_paper_no_cls_contract
+
+        config = self._valid_config()
+        config["loss"]["aniso_mode"] = "elongate_barrier"
+        config["loss"]["aniso_barrier_threshold"] = 3.0
+        with self.assertRaisesRegex(ValueError, "contract mismatch"):
+            assert_paper_no_cls_contract(config)
+
+    def test_paper_aniso_fields_mirrors_declaration(self):
+        from tda_ml.preflight import paper_aniso_fields
+
+        config = self._valid_config()
+        self.assertEqual(paper_aniso_fields(config), {"aniso_mode": "elongate"})
+        config["loss"]["aniso_mode"] = "elongate_barrier"
+        config["loss"]["aniso_barrier_threshold"] = 6.0
+        self.assertEqual(
+            paper_aniso_fields(config),
+            {"aniso_mode": "elongate_barrier", "aniso_barrier_threshold": 6.0},
+        )
+        del config["loss"]["aniso_barrier_threshold"]
+        with self.assertRaisesRegex(ValueError, "aniso_barrier_threshold"):
+            paper_aniso_fields(config)
+
 
 class TestResolveValTopoCheckpoint(unittest.TestCase):
     def test_missing_best_model_raises(self):

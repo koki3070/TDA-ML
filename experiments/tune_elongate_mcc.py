@@ -37,7 +37,7 @@ from tda_ml.checkpoint_io import resolve_val_topo_checkpoint
 from tda_ml.config import deep_update, load_config
 from tda_ml.dbscan_eval import evaluate_model_grid
 from tda_ml.main import main as train_main
-from tda_ml.preflight import preflight_mcc_tune_study
+from tda_ml.preflight import paper_aniso_fields, preflight_mcc_tune_study
 from tda_ml.reproducibility import reproducibility_settings, write_json
 from tda_ml.supervised_diagnostics import git_revision
 from tda_ml.topo_wdist import topo_wdist_options_from_config
@@ -84,7 +84,8 @@ def build_trial_config(
             "w_aniso": float(w_aniso),
             "w_size": float(w_size),
             "w_topo": float(w_topo),
-            "aniso_mode": "elongate",
+            # aniso variant mirrors the base config declaration.
+            **paper_aniso_fields(cfg),
             "size_mode": size_mode,
             "size_ref": float(size_ref),
             "size_power": float(size_power),
@@ -247,6 +248,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     Path(args.out_base).mkdir(parents=True, exist_ok=True)
+    base_cfg_for_aniso = load_config(args.base_config, project_root=REPO_ROOT)
     preflight = preflight_mcc_tune_study(
         base_config=args.base_config,
         project_root=REPO_ROOT,
@@ -260,7 +262,7 @@ def main() -> int:
                 }
             },
             "loss": {
-                "aniso_mode": "elongate",
+                **paper_aniso_fields(base_cfg_for_aniso),
                 "size_mode": args.size_mode,
                 "size_ref": args.size_ref,
                 "size_power": args.size_power,

@@ -33,6 +33,8 @@
 
 主表・チューニングの preflight は `homology_dimensions=[1]`、`teacher_mode=local_pca`、`prob_weighting=false`、`aniso_mode=elongate`、`distance_backend=ellphi`、`size_mode=power`、`w_class=0.0`、`teacher_local_pca_k=10`、`teacher_local_pca_normalize_axes=true` の明示を要求する。欠落や不一致は実行前に hard-fail する。本番 30ep は `--tune-json`（H1-only Optuna best）必須で、YAML 埋め込みの旧重みでは起動しない。
 
+**退化ガード variant（opt-in）:** near-tangent データでは素の `elongate` が短軸→0（epoch 15 で短半径 ~1e-5、アスペクト比 ~350）まで潰し、ellphi の tangency 計算が hard-fail する（stage-2 tune 16 条件中 15 失敗）。この対策として `aniso_mode: elongate_barrier`（elongate 報酬 + 閾値超過アスペクト比への二次バリア）を **config で明示宣言する第 2 の契約 variant**（`PAPER_NO_CLS_BARRIER_CONTRACT`、`aniso_barrier_threshold=6.0` 必須）として定義する。暗黙の切替・clamp は行わず、variant は base config の `loss.aniso_mode` 宣言から `paper_aniso_fields()` 経由で tune／本番へ伝播し、STUDY_PREFLIGHT・tune JSON・run manifest（`paper_no_cls_contract`／`loss_overrides`）に記録される。集計は `aggregate_power_30ep_multiseed.py --aniso-variant elongate_barrier` で契約一致を検証する。
+
 ## 環境
 
 - **Python**: `.python-version` を参照（現状 3.12）。

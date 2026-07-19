@@ -78,6 +78,27 @@ class TestTuneTrialConfig(unittest.TestCase):
             "tune_elongate_wdist.load_config",
             side_effect=lambda *a, **k: deepcopy(divergent),
         ):
+            # aniso_mode is now mirrored from the base config declaration, so a
+            # non-paper variant must hard-fail instead of being silently forced.
+            with self.assertRaisesRegex(ValueError, "not a declared paper variant"):
+                build_wdist_trial(
+                    "ignored",
+                    w_aniso=0.1,
+                    w_size=0.2,
+                    w_topo=0.3,
+                    lr=1e-4,
+                    backend="ellphi",
+                    tune_epochs=5,
+                    out_base="outputs/x",
+                    trial_number=1,
+                    size_mode="power",
+                )
+
+        divergent["loss"]["aniso_mode"] = "elongate"
+        with mock.patch(
+            "tune_elongate_wdist.load_config",
+            side_effect=lambda *a, **k: deepcopy(divergent),
+        ):
             cfg = build_wdist_trial(
                 "ignored",
                 w_aniso=0.1,
@@ -92,6 +113,23 @@ class TestTuneTrialConfig(unittest.TestCase):
             )
         self.assertEqual(cfg["model"]["topology_loss"]["homology_dimensions"], [1])
         self.assertEqual(cfg["loss"]["aniso_mode"], "elongate")
+
+    def test_wdist_builder_mirrors_barrier_variant_from_base_config(self):
+        cfg = build_wdist_trial(
+            "elongate_n100_no_cls_tune_local_pca_ellphi_power_h1_neartangent_barrier",
+            w_aniso=0.1,
+            w_size=0.2,
+            w_topo=0.3,
+            lr=1e-4,
+            backend="ellphi",
+            tune_epochs=5,
+            out_base="outputs/x",
+            trial_number=3,
+            size_mode="power",
+        )
+        self.assertEqual(cfg["loss"]["aniso_mode"], "elongate_barrier")
+        self.assertEqual(cfg["loss"]["aniso_barrier_threshold"], 6.0)
+        self.assertEqual(cfg["model"]["topology_loss"]["homology_dimensions"], [1])
 
     def test_mcc_builder_forces_homology_h1(self):
         cfg = build_mcc_trial(

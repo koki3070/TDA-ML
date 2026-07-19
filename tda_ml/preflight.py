@@ -42,11 +42,28 @@ PAPER_NO_CLS_CONTRACT: dict[str, Any] = {
     "teacher_local_pca_normalize_axes": True,
 }
 
+# Opt-in degeneracy-guard variant: identical stack, but the anisotropy loss is
+# ``elongate_barrier`` (elongate reward + quadratic barrier on aspect ratios
+# above the declared threshold). Motivated by near-tangent tuning where plain
+# ``elongate`` drove minor axes to ~1e-5 / aspect ~350 by epoch 15 and ellphi
+# tangency hard-failed on the needle geometry.
+PAPER_NO_CLS_BARRIER_ANISO_THRESHOLD = 6.0
+PAPER_NO_CLS_BARRIER_CONTRACT: dict[str, Any] = {
+    **PAPER_NO_CLS_CONTRACT,
+    "aniso_mode": "elongate_barrier",
+    "aniso_barrier_threshold": PAPER_NO_CLS_BARRIER_ANISO_THRESHOLD,
+}
+
 _KNOWN_TEACHER_MODES = frozenset({"euclidean", "local_pca"})
 
 
 def assert_paper_no_cls_contract(config: dict[str, Any]) -> dict[str, Any]:
-    """Require the declared H1-only paper method; never infer missing fields."""
+    """Require a declared H1-only paper method variant; never infer missing fields.
+
+    Two declared variants exist, selected explicitly by ``loss.aniso_mode``:
+    ``elongate`` (original) and ``elongate_barrier`` (degeneracy guard, which
+    additionally requires ``loss.aniso_barrier_threshold``).
+    """
     topo = (config.get("model") or {}).get("topology_loss") or {}
     loss = config.get("loss") or {}
     actual: dict[str, Any] = {}
@@ -73,9 +90,18 @@ def assert_paper_no_cls_contract(config: dict[str, Any]) -> dict[str, Any]:
 
     if "aniso_mode" not in loss:
         raise ValueError(
-            "Paper no_cls config must explicitly define loss.aniso_mode='elongate'"
+            "Paper no_cls config must explicitly define loss.aniso_mode "
+            "('elongate' or 'elongate_barrier')"
         )
     actual["aniso_mode"] = str(loss["aniso_mode"]).strip().lower()
+    if actual["aniso_mode"] == "elongate_barrier":
+        if "aniso_barrier_threshold" not in loss:
+            raise ValueError(
+                "Paper no_cls barrier variant must explicitly define "
+                "loss.aniso_barrier_threshold "
+                f"(declared value: {PAPER_NO_CLS_BARRIER_ANISO_THRESHOLD})"
+            )
+        actual["aniso_barrier_threshold"] = float(loss["aniso_barrier_threshold"])
 
     if "distance_backend" not in topo:
         raise ValueError(
@@ -111,12 +137,47 @@ def assert_paper_no_cls_contract(config: dict[str, Any]) -> dict[str, Any]:
         loss["teacher_local_pca_normalize_axes"]
     )
 
-    if actual != PAPER_NO_CLS_CONTRACT:
+    expected = (
+        PAPER_NO_CLS_BARRIER_CONTRACT
+        if actual.get("aniso_mode") == "elongate_barrier"
+        else PAPER_NO_CLS_CONTRACT
+    )
+    if actual != expected:
         raise ValueError(
             "Paper no_cls contract mismatch: "
-            f"expected={PAPER_NO_CLS_CONTRACT}, actual={actual}"
+            f"expected={expected}, actual={actual}"
         )
     return actual
+
+
+def paper_aniso_fields(config: dict[str, Any]) -> dict[str, Any]:
+    """Extract the declared anisotropy variant fields from a config.
+
+    Returns ``{"aniso_mode": ...}`` plus ``aniso_barrier_threshold`` for the
+    barrier variant. Hard-fails on missing declarations so scripts mirror the
+    base config instead of hardcoding a variant.
+    """
+    loss = config.get("loss") or {}
+    if "aniso_mode" not in loss:
+        raise ValueError(
+            "loss.aniso_mode must be set explicitly "
+            "('elongate' or 'elongate_barrier')"
+        )
+    mode = str(loss["aniso_mode"]).strip().lower()
+    if mode not in ("elongate", "elongate_barrier"):
+        raise ValueError(
+            f"loss.aniso_mode={mode!r} is not a declared paper variant "
+            "('elongate' or 'elongate_barrier')"
+        )
+    fields: dict[str, Any] = {"aniso_mode": mode}
+    if mode == "elongate_barrier":
+        if "aniso_barrier_threshold" not in loss:
+            raise ValueError(
+                "loss.aniso_barrier_threshold must be set explicitly for "
+                "aniso_mode='elongate_barrier'"
+            )
+        fields["aniso_barrier_threshold"] = float(loss["aniso_barrier_threshold"])
+    return fields
 
 
 def _require_import(name: str, import_fn) -> None:
@@ -207,6 +268,15 @@ def preflight_training_config(
         if key not in loss and key not in training:
             raise ValueError(
                 f"loss.{key} must be set explicitly; refusing silent Trainer defaults"
+            )
+    aniso_mode = str(
+        loss.get("aniso_mode", training.get("aniso_mode"))
+    ).strip().lower()
+    if aniso_mode in ("barrier", "elongate_barrier"):
+        if "aniso_barrier_threshold" not in loss and "barrier_threshold" not in training:
+            raise ValueError(
+                "loss.aniso_barrier_threshold must be set explicitly for "
+                f"aniso_mode={aniso_mode!r}; refusing silent 6.0 default"
             )
     ellphi_diff = bool(topo.get("ellphi_differentiable", True))
     if backend == "ellphi":
