@@ -72,12 +72,16 @@ cat > "${ROOT_OUT}/MULTIFIDELITY_PLAN.json" <<EOF
 }
 EOF
 
+# Workers use ~4 cores each regardless of thread count (small clouds; ellphi
+# tangency does not scale with threads), so prefer many workers over threads.
+STAGE1_WORKERS="${STAGE1_WORKERS:-8}"
+STAGE1_TRIALS_PER_WORKER=$(( (16 + STAGE1_WORKERS - 1) / STAGE1_WORKERS ))
 BASE_CONFIG="${BASE_CONFIG}" \
 OUT_BASE="${STAGE1_OUT}" \
 STUDY_NAME="${STAGE1_STUDY}" \
 THREADS_PER_WORKER="${STAGE1_THREADS:-12}" \
-TRIALS_PER_WORKER=2 \
-bash experiments/run_tune_local_pca_power_wdist_parallel.sh 8 16 5 ellphi
+TRIALS_PER_WORKER="${STAGE1_TRIALS_PER_WORKER}" \
+bash experiments/run_tune_local_pca_power_wdist_parallel.sh "${STAGE1_WORKERS}" 16 5 ellphi
 
 uv run python -u experiments/enqueue_top_optuna_trials.py \
   --source-storage "${STAGE1_STORAGE}" \
