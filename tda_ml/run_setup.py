@@ -86,6 +86,42 @@ def build_dataloaders(config, seed: int, settings: DataLoaderSettings):
         persistent_workers=settings.persistent_workers,
         prefetch_factor=settings.prefetch_factor,
     )
+
+    dataset_type = str(data_cfg.get("dataset_type", "")).strip().lower()
+    if not dataset_type:
+        raise ValueError(
+            "data.dataset_type must be set explicitly (mnist|thin_rings); "
+            "refusing silent MNIST default"
+        )
+    if dataset_type == "thin_rings":
+        from tda_ml.ring_dataset import (
+            TEST_INDEX_OFFSET,
+            ThinRingsDataset,
+            ring_kwargs_from_config,
+        )
+
+        if "noise_std" not in data_cfg:
+            raise ValueError("data.noise_std must be set explicitly; refusing silent default")
+        common = dict(
+            max_points=int(data_cfg["max_points"]),
+            num_outliers=int(data_cfg["num_outliers"]),
+            noise_std=float(data_cfg["noise_std"]),
+            noise_seed=seed,
+            **ring_kwargs_from_config(data_cfg),
+        )
+        train_dataset = ThinRingsDataset(train_size, index_offset=0, **common)
+        val_dataset = ThinRingsDataset(val_size, index_offset=train_size, **common)
+        test_dataset = ThinRingsDataset(test_size, index_offset=TEST_INDEX_OFFSET, **common)
+        return (
+            create_data_loader(train_dataset, shuffle=True, **loader_kwargs),
+            create_data_loader(val_dataset, shuffle=False, **loader_kwargs),
+            create_data_loader(test_dataset, shuffle=False, **loader_kwargs),
+        )
+    if dataset_type != "mnist":
+        raise ValueError(
+            f"data.dataset_type must be 'mnist' or 'thin_rings', got {dataset_type!r}"
+        )
+
     if "outlier_mode" not in data_cfg:
         raise ValueError(
             "data.outlier_mode must be set explicitly (uniform|local_pca_tangent); "

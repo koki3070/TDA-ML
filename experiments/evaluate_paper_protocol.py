@@ -148,6 +148,46 @@ def build_split_loader(config: dict[str, Any], split: str, device: torch.device)
     else:
         raise ValueError(f"split must be 'val' or 'test'; got {split!r}")
 
+    dataset_type = str(data_cfg.get("dataset_type", "")).strip().lower()
+    if not dataset_type:
+        raise ValueError(
+            "data.dataset_type must be set explicitly (mnist|thin_rings); "
+            "refusing silent MNIST default"
+        )
+    if dataset_type == "thin_rings":
+        from tda_ml.ring_dataset import (
+            TEST_INDEX_OFFSET,
+            ThinRingsDataset,
+            ring_kwargs_from_config,
+        )
+
+        if "noise_std" not in data_cfg:
+            raise ValueError("data.noise_std must be set explicitly; refusing silent default")
+        common = dict(
+            max_points=int(data_cfg["max_points"]),
+            num_outliers=int(data_cfg["num_outliers"]),
+            noise_std=float(data_cfg["noise_std"]),
+            noise_seed=seed,
+            **ring_kwargs_from_config(data_cfg),
+        )
+        if split == "val":
+            dataset = ThinRingsDataset(val_size, index_offset=train_size, **common)
+        else:
+            dataset = ThinRingsDataset(test_size, index_offset=TEST_INDEX_OFFSET, **common)
+        return create_data_loader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+            persistent_workers=False,
+            prefetch_factor=2 if num_workers > 0 else None,
+        )
+    if dataset_type != "mnist":
+        raise ValueError(
+            f"data.dataset_type must be 'mnist' or 'thin_rings', got {dataset_type!r}"
+        )
+
     if "outlier_mode" not in data_cfg:
         raise ValueError(
             "data.outlier_mode must be set explicitly (uniform|local_pca_tangent); "

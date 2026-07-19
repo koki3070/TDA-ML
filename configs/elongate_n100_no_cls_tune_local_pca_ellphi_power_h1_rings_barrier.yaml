@@ -1,0 +1,91 @@
+# H1-only tune on THIN SYNTHETIC RINGS with radial (normal-direction) outliers
+# and the elongate_barrier degeneracy guard.
+#
+# Why rings (docs/experiments/20260719_neartangent_barrier.md, 追記):
+# on MNIST 100-point clouds the local-PCA teacher ellipses are only mildly
+# anisotropic (aspect median ~1.8; strokes have width), so no outlier direction
+# can favour anisotropic methods. Thin rings reach teacher aspect ~8-9 and the
+# radial outliers sit within ~1 NN spacing of the ring: Euclidean-ambiguous
+# (NN AUC ~0.82) yet Mahalanobis-clear (~0.94). Rings are H1 loops, matching
+# the H1-only pipeline.
+#
+# Known tension: the barrier caps predicted aspect at 6.0 (declared contract
+# constant) while ring teacher aspect is ~8-9; accepted for stability, revisit
+# if topo match suffers.
+
+meta:
+  config_id: "elongate_n100_no_cls_tune_local_pca_ellphi_power_h1_rings_barrier"
+
+model:
+  point_dim: 2
+  feature_dim: 128
+  ellipse_param_dim: 5
+  threshold: 0.5
+  topology_loss:
+    metric_type: "anisotropic"
+    distance_backend: "mahalanobis"  # overridden to ellphi by tune script
+    ellphi_differentiable: true
+    prob_weighting: false
+    homology_dimensions: [1]
+
+loss:
+  w_class: 0.0
+  w_topo: 0.0883
+  w_aniso: 0.0541
+  w_size: 0.488
+  pos_weight: 1.0
+  aniso_mode: elongate_barrier
+  aniso_barrier_threshold: 6.0
+  size_mode: power
+  size_ref: 1.34
+  size_power: 1.5
+  teacher_mode: local_pca
+  teacher_local_pca_k: 10
+  teacher_local_pca_normalize_axes: true
+
+training:
+  lr: 0.000158
+  epochs: 20
+  grad_clip_value: 1.0
+  visualize_every: 10000
+  warmup_epochs: 0
+  selection:
+    metric: val_topo
+    eval_every: 1
+    dbscan:
+      eps_values: null
+      min_samples_values: null
+
+data:
+  dataset_type: thin_rings
+  max_points: 100
+  num_outliers: 20
+  # Thin rings: transverse sigma (noise_std) << along-ring NN spacing (~0.04),
+  # so local-PCA ellipses are strongly anisotropic. Outliers displace clean
+  # ring points radially by 0.03-0.06 (within ~1 NN spacing: Euclidean-hard)
+  # and must stay >= 0.03 off every ring band (semantic guard).
+  noise_std: 0.005
+  ring_count_min: 1
+  ring_count_max: 2
+  ring_radius_min: 0.25
+  ring_radius_max: 0.60
+  ring_center_box: 0.30
+  ring_outlier_offset_min: 0.03
+  ring_outlier_offset_max: 0.06
+  ring_outlier_clearance: 0.03
+  seed: 42
+  train_size: 4500
+  val_size: 500
+  test_size: 1000
+  num_workers: 2
+  batch_size: 64
+  pin_memory: true
+
+performance:
+  cudnn_benchmark: true
+  enable_tf32: true
+  matmul_precision: high
+
+outputs:
+  base_dir: "outputs"
+  save_every: 1

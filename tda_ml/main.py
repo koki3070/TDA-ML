@@ -93,21 +93,40 @@ def main(config_name=None, config=None, trial=None, config_overrides=None):
         init_checkpoint = config.get("init_checkpoint")
         if init_checkpoint and not os.path.exists(init_checkpoint):
             raise FileNotFoundError(f"Initial checkpoint not found: {init_checkpoint}")
-        if "outlier_mode" not in data_cfg:
+        dataset_type = str(data_cfg.get("dataset_type", "")).strip().lower()
+        if not dataset_type:
             raise ValueError(
-                "data.outlier_mode must be set explicitly (uniform|local_pca_tangent); "
-                "refusing silent uniform default in run manifest"
+                "data.dataset_type must be set explicitly (mnist|thin_rings); "
+                "refusing silent MNIST default in run manifest"
             )
-        outlier_mode = str(data_cfg["outlier_mode"]).strip().lower()
         if "noise_std" not in data_cfg:
             raise ValueError(
                 "data.noise_std must be set explicitly; refusing silent default in run manifest"
             )
-        data_outliers = {
-            "outlier_mode": outlier_mode,
-            "noise_std": float(data_cfg["noise_std"]),
-            "num_outliers": int(data_cfg["num_outliers"]),
-        }
+        if dataset_type == "thin_rings":
+            from tda_ml.ring_dataset import ring_kwargs_from_config
+
+            outlier_mode = "ring_radial"
+            data_outliers = {
+                "dataset_type": dataset_type,
+                "outlier_mode": outlier_mode,
+                "noise_std": float(data_cfg["noise_std"]),
+                "num_outliers": int(data_cfg["num_outliers"]),
+                **ring_kwargs_from_config(data_cfg),
+            }
+        else:
+            if "outlier_mode" not in data_cfg:
+                raise ValueError(
+                    "data.outlier_mode must be set explicitly (uniform|local_pca_tangent); "
+                    "refusing silent uniform default in run manifest"
+                )
+            outlier_mode = str(data_cfg["outlier_mode"]).strip().lower()
+            data_outliers = {
+                "dataset_type": dataset_type,
+                "outlier_mode": outlier_mode,
+                "noise_std": float(data_cfg["noise_std"]),
+                "num_outliers": int(data_cfg["num_outliers"]),
+            }
         if outlier_mode == "local_pca_tangent":
             for key in (
                 "tangent_pca_k",
