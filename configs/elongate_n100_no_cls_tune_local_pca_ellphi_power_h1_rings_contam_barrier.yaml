@@ -1,0 +1,87 @@
+# H1-only tune on CONTAMINATED thin rings: more/closer radial outliers so that
+# ADBSCAN local-PCA (computed on the observed cloud) is systematically poisoned,
+# while the proposed method is trained against a CLEAN local-PCA teacher.
+#
+# Probe (40 clouds): current rings already contaminate 83% of inlier kNN balls
+# (obs aspect 8.9→3.1). This variant amplifies that: 40 outliers, offset 0.015-0.035,
+# ~98% inlier neighborhoods contaminated, outlier Mahalanobis under obs ellipses
+# halves again vs clean teacher. Hypothesis: proposed inductive bias beats
+# contaminated ADBSCAN; Euclidean should still fail.
+#
+# Known tension: barrier aspect cap 6.0 vs clean teacher aspect ~9.
+
+meta:
+  config_id: "elongate_n100_no_cls_tune_local_pca_ellphi_power_h1_rings_contam_barrier"
+
+model:
+  point_dim: 2
+  feature_dim: 128
+  ellipse_param_dim: 5
+  threshold: 0.5
+  topology_loss:
+    metric_type: "anisotropic"
+    distance_backend: "mahalanobis"  # overridden to ellphi by tune script
+    ellphi_differentiable: true
+    prob_weighting: false
+    homology_dimensions: [1]
+
+loss:
+  w_class: 0.0
+  w_topo: 0.0883
+  w_aniso: 0.0541
+  w_size: 0.488
+  pos_weight: 1.0
+  aniso_mode: elongate_barrier
+  aniso_barrier_threshold: 6.0
+  size_mode: power
+  size_ref: 1.34
+  size_power: 1.5
+  teacher_mode: local_pca
+  teacher_local_pca_k: 10
+  teacher_local_pca_normalize_axes: true
+
+training:
+  lr: 0.000158
+  epochs: 20
+  grad_clip_value: 1.0
+  visualize_every: 10000
+  warmup_epochs: 0
+  selection:
+    metric: val_topo
+    eval_every: 1
+    dbscan:
+      eps_values: null
+      min_samples_values: null
+
+data:
+  dataset_type: thin_rings
+  max_points: 100
+  num_outliers: 40
+  # Thin rings: transverse sigma (noise_std) << along-ring NN spacing (~0.04),
+  # so local-PCA ellipses are strongly anisotropic. Outliers: 40 points, radial offset 0.015-0.035 (inside typical kNN radius)
+  # so ADBSCAN local-PCA neighborhoods are heavily contaminated. Clearance 0.015.
+  noise_std: 0.005
+  ring_count_min: 1
+  ring_count_max: 2
+  ring_radius_min: 0.25
+  ring_radius_max: 0.60
+  ring_center_box: 0.30
+  ring_outlier_offset_min: 0.015
+  ring_outlier_offset_max: 0.035
+  ring_outlier_clearance: 0.015
+  seed: 42
+  train_size: 4500
+  val_size: 500
+  test_size: 1000
+  num_workers: 2
+  batch_size: 64
+  pin_memory: true
+
+performance:
+  cudnn_benchmark: true
+  enable_tf32: true
+  matmul_precision: high
+
+outputs:
+  base_dir: "outputs"
+  save_every: 1
