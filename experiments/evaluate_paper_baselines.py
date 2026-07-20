@@ -258,9 +258,13 @@ def grid_search_clouds(
     allow_skip_degenerate_grid_cells: bool = False,
     manifest_ref: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], float, list[dict[str, Any]]]:
-    best_mcc = -1.0
-    best_params = dict(param_combos[0])
+    # Select by max mean MCC among successful cells. Negative MCC is a valid
+    # outcome (method worse than chance on this data); only hard-fail when every
+    # cell errored or the combo list is empty.
+    best_mcc: float | None = None
+    best_params: dict[str, Any] | None = None
     grid_log: list[dict[str, Any]] = []
+    n_ok = 0
 
     for params in tqdm(param_combos, desc=desc, leave=False):
         per_cloud: list[CloudMetrics] = []
@@ -289,15 +293,18 @@ def grid_search_clouds(
                 "to skipping failed cells."
             )
         _, _, _, mcc, _ = _aggregate_cloud_metrics(per_cloud)
+        n_ok += 1
         grid_log.append(
             {**params, "status": "ok", "mean_mcc": mcc, "n_clouds": len(per_cloud)}
         )
-        if mcc > best_mcc:
+        if best_mcc is None or mcc > best_mcc:
             best_mcc = mcc
             best_params = dict(params)
 
-    if best_mcc < 0:
-        raise RuntimeError(f"Grid search failed for all hparams ({desc}); log={grid_log[:5]}")
+    if n_ok == 0 or best_params is None or best_mcc is None:
+        raise RuntimeError(
+            f"Grid search failed for all hparams ({desc}); log={grid_log[:5]}"
+        )
     return best_params, best_mcc, grid_log
 
 
