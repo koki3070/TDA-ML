@@ -32,7 +32,9 @@ export OPENBLAS_NUM_THREADS="${OPENBLAS_NUM_THREADS:-${THREADS_PER_WORKER}}"
 N_WORKERS="${N_WORKERS:-4}"
 
 MODE="${1:-both}"
-shift || true
+if [[ $# -gt 0 ]]; then
+  shift
+fi
 if [[ $# -gt 0 && "${1:-}" =~ ^[0-9]+$ ]]; then
   SEEDS=("$@")
 else

@@ -274,8 +274,6 @@ def main() -> int:
             split,
             "--backend",
             args.dbscan_backend,
-            "--checkpoint-name",
-            "best_model.pth",
             "--tag",
             tag,
         ]

@@ -257,7 +257,12 @@ def run_one(
     cfg = load_config(base_config_name, project_root=REPO_ROOT)
     config_id = f"backend_{backend}_seed{seed}"
     topo_cfg = cfg.get("model", {}).get("topology_loss", {})
-    ellphi_diff = bool(topo_cfg.get("ellphi_differentiable", True))
+    if "ellphi_differentiable" not in topo_cfg:
+        raise ValueError(
+            "model.topology_loss.ellphi_differentiable must be set explicitly "
+            "in the base config; refusing silent true default"
+        )
+    ellphi_diff = bool(topo_cfg["ellphi_differentiable"])
 
     overrides: dict[str, Any] = {
         "meta": {"config_id": config_id},

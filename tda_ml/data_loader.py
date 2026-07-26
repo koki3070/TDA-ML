@@ -168,7 +168,8 @@ class NoisyMNISTDataset(Dataset):
             if not self.allow_empty_cloud_fallback:
                 raise RuntimeError(
                     f"Empty foreground point cloud at dataset index {idx}; "
-                    "set data.allow_empty_cloud_fallback=true to opt in to random fallback."
+                    "set reproducibility.allow_empty_cloud_fallback=true to opt in "
+                    "to random fallback."
                 )
             fallback_n = min(8, self.max_points)
             if self.deterministic:

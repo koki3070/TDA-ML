@@ -1,8 +1,9 @@
-# Optuna tune: local_pca + ellphi + size_mode=power.
-# Train ckpt: val_topo (fast). Trial objective: one val DBSCAN grid → MCC max.
+# Shared Optuna tune base for W-Dist and MCC studies (local_pca + ellphi + power).
+# Train ckpt: val_topo (fast). Trial objective is chosen by the tune driver
+# (tune_elongate_wdist.py vs tune_elongate_mcc.py), not by this config_id.
 
 meta:
-  config_id: "elongate_n100_no_cls_tune_local_pca_ellphi_power_mcc"
+  config_id: "elongate_n100_no_cls_tune_local_pca_ellphi_power"
 
 model:
   point_dim: 2
@@ -29,6 +30,8 @@ loss:
   teacher_mode: local_pca
   teacher_local_pca_k: 10
   teacher_local_pca_normalize_axes: true
+  topo_eps_scale: 1.0
+  topo_scale_mode: fixed
 
 training:
   lr: 0.000158

@@ -16,6 +16,7 @@ from sklearn.cluster import DBSCAN
 
 from tda_ml.dbscan import compute_anisotropic_distance_matrix_np
 from tda_ml.metrics import compute_recall_specificity_gmean_mcc
+from tda_ml.numerical_eps import ZERO_PAD_ABS_SUM
 from tda_ml.reproducibility import record_fallback, resolve_dbscan_grid, write_grid_log
 from tda_ml.topo_wdist import TopoWdistOptions, compute_topo_wdist
 
@@ -58,7 +59,7 @@ class PreparedCloud:
 
 def valid_clean_inliers(clean_pc: np.ndarray) -> np.ndarray:
     """Drop zero-padding rows from the clean (ground-truth inlier) point cloud."""
-    mask = np.abs(clean_pc).sum(axis=1) > 1e-6
+    mask = np.abs(clean_pc).sum(axis=1) > ZERO_PAD_ABS_SUM
     return clean_pc[mask]
 
 

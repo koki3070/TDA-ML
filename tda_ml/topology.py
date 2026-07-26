@@ -137,6 +137,9 @@ def _sqrt_off_diagonal_only(dist_sq: torch.Tensor) -> torch.Tensor:
     ``dist_sq > 0`` (never to zero squared distances, including self-distance and
     coincident off-diagonal pairs).
     """
+    # Declared FP guard, not a modeling floor: squared Mahalanobis distances are
+    # mathematically >= 0; this removes negative floating-point rounding noise
+    # before the masked sqrt (see tda_ml/numerical_eps.py module docstring).
     dist_sq = torch.clamp(dist_sq, min=0.0)
     dist = torch.zeros_like(dist_sq)
     positive = dist_sq > 0

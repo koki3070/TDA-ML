@@ -1,130 +1,112 @@
-# TDA-ML Reproducibility Repository
+# TDA-ML
 
-This repository provides a reproducibility-focused implementation for anisotropic topological denoising experiments.
+Clean-room, reproducibility-focused implementation for anisotropic topological
+denoising (Letters / applied-math reference code).
 
-For **data layout, checkpoints, figure-related scripts, and CI tests**, see [`REPRODUCIBILITY.md`](REPRODUCIBILITY.md) (reader-facing).
+Reader-facing protocol, manifests, and failure semantics:
+[`REPRODUCIBILITY.md`](REPRODUCIBILITY.md).
+
+Computational discipline follows
+[computational-reproducibility](https://github.com/t-uda/skills/blob/main/skills/computational-reproducibility/SKILL.md)
+(no silent fallback; declared numerical constants in `tda_ml/numerical_eps.py`).
+
+## Claim (main table)
+
+Proposed method (W-Dist-tuned weights, 30 epochs × 5 data seeds) shows
+**comparable** outlier-removal performance to Euclidean DBSCAN and ADBSCAN on
+**MCC / G-Mean** (descriptive mean ± sample std over seeds; no equivalence test).
+Main table does **not** include a Topo W. column.
+
+ADBSCAN uses fixed local-PCA ellipses (no training). The proposed method trains
+for 30 epochs on the same data; the comparison is not compute-matched.
 
 ## Setup
 
-Use `uv` as the canonical dependency manager.
-
-`torch_topological` is a **local path dependency** (`pyproject.toml` → `pytorch-topological/`). That directory is not always present after a plain `git clone`; sync it to the pinned commit in `third_party/pytorch_topological.ref` (same as CI):
-
 ```bash
 ./scripts/ensure_pytorch_topological.sh
-```
-
-`ellphi` is also a **local path dependency** (`pyproject.toml` → `ellphi_repo/`). Sync the pinned fork (differentiable tangency grad API) before `uv sync`:
-
-```bash
 ./scripts/ensure_ellphi_repo.sh
-```
-
-Optional: if this repository records `pytorch-topological` as a git submodule gitlink, `git submodule update --init --recursive` may populate the tree first; the ensure script still verifies the pinned commit. See `third_party/README.md` when bumping the pin.
-
-Then install Python dependencies:
-
-```bash
 uv sync
-```
-
-For development dependencies:
-
-```bash
+# development (tests, ruff):
 uv sync --all-groups
+# Optuna tune drivers:
+uv sync --extra experiments
 ```
 
-Optional package extras (e.g. `robustness_sweep`, HomCloud animation, explicit Pillow):
+`torch_topological` and `ellphi` are **local path dependencies** (pinned under
+`third_party/*.ref`). A plain `git clone` is not enough; run the ensure scripts
+before `uv sync`. See `third_party/README.md` when bumping pins.
+
+## Paper production path (primary)
+
+Main table: **W-Dist-tuned weights**, 30 epochs × 5 data seeds, `w_class=0`,
+H1-only, local-PCA teacher, ellphi distance, checkpoint `best_model.pth`
+(`selection=val_topo`), then val DBSCAN grid → test MCC / G-Mean.
+
+Config: `elongate_n100_no_cls_full120_teacher_local_pca`.
 
 ```bash
-uv sync --extra experiments --extra repro-pd-animation --extra images
+# 1) Tune once (Optuna sampler seeds differ per worker; data seed in YAML is 42).
+#    Default MODE=both also runs the secondary MCC study; main table needs wdist.
+MODE=wdist bash experiments/run_tune_local_pca_power_objectives.sh
+
+# 2) Fixed W-Dist weights → 30ep × 5 seeds → paper eval (+ baselines separately)
+bash experiments/run_teacher_local_pca_power_30ep_multiseed.sh wdist
+
+uv run python experiments/evaluate_paper_baselines.py \
+  --base-config elongate_n100_no_cls_full120_teacher_local_pca \
+  --out-dir outputs/paper_baselines
 ```
 
-If you use `pip` instead of `uv`, run `./scripts/ensure_pytorch_topological.sh` and `./scripts/ensure_ellphi_repo.sh` from the repository root, then install from `pyproject.toml` with `pip install .` or `pip install -e .` for an editable install; add optional extras when needed (for example `pip install -e ".[experiments,repro-pd-animation,images]"`). There is no `requirements.txt`; dependency pins live in `uv.lock` for `uv` users.
+Details and contract keys: `REPRODUCIBILITY.md` / `configs/README.md`.
+Generated artifacts stay under `outputs/` (not committed).
 
-## Minimal Reproduction
+## Backend pipeline comparison (secondary / CI)
 
-Use the following command as the official reproduction entrypoint:
+`experiments/run_backend_multiseed.py` compares **full training pipelines** under
+`configs/reproduce.yaml`. It is **not** the paper main-table entrypoint and
+**not** a pure distance-backend ablation.
 
 ```bash
+# CI-style smoke
 uv run python experiments/run_backend_multiseed.py \
   --base-config reproduce \
-  --epochs 50 \
-  --seeds 42 123 456 789 1024 \
+  --epochs 1 --seeds 42 --backends mahalanobis \
+  --out-base outputs/smoke
+
+# Full secondary comparison (local / own runner; not CI)
+uv run python experiments/run_backend_multiseed.py \
+  --base-config reproduce \
+  --epochs 50 --seeds 42 123 456 789 1024 \
   --backends mahalanobis ellphi \
   --out-base outputs/backend_compare
 ```
 
-Run this command from the repository root.
+Expected under `--out-base`: `progress_summary.csv`, `backend_stats.csv`, and
+per-run `*/logs/metrics.csv`. Resume skips completed `(backend, seed, epochs)`
+keys; use `--rerun-completed` to force. A lock file under `--out-base` aborts if
+another process is active.
 
-Expected artifacts:
-
-- `outputs/backend_compare/progress_summary.csv`
-- `outputs/backend_compare/backend_stats.csv`
-- `outputs/backend_compare/*/logs/metrics.csv`
-
-Direct execution of `tda_ml/main.py` is non-official and not part of the canonical reproduction path.
-
-### Resume Behavior
-
-- `run_backend_multiseed.py` skips completed runs using the key `(backend, seed, epochs)`.
-- Changing `--epochs` creates a different run key and will not be skipped.
-- Use `--rerun-completed` to force rerun even when the same key already exists.
-- `progress_summary.csv` header is validated on startup. If header mismatch occurs, use a fresh `--out-base` or fix the CSV manually.
-
-### Operational Notes
-
-- `run_backend_multiseed.py` creates a lock file under `--out-base` and aborts if another process is active there.
-- `progress_summary.csv` stores `run_dir` as provided by `--out-base`; avoid sharing logs with personal absolute paths if privacy is a concern.
-- Keep `metrics.csv` schema compatible with the current trainer output (`val_mcc`, `val_recall`, `val_loss` are required).
-
-## Quick Smoke Run
-
-For a fast wiring check before the full run:
-
-```bash
-uv run python experiments/run_backend_multiseed.py \
-  --base-config reproduce \
-  --epochs 1 \
-  --seeds 42 \
-  --backends mahalanobis \
-  --out-base outputs/smoke
-```
+`tda_ml.main` is an internal trainer entry used by the drivers above; do not
+treat direct invocation as the public protocol.
 
 ## Continuous integration
 
-On pull requests and pushes to `main` / `feature/**`, CI runs:
+PRs and pushes to `main` / `feature/**` run `ruff`, tests, and the **1-epoch
+mahalanobis smoke** above. Paper 30ep × 5-seed production is not run in CI.
 
-- `ruff check`
-- `pytest`
-- A **repro smoke** only: `run_backend_multiseed.py` with `--epochs 1`, one seed, and `mahalanobis` (see `.github/workflows/ruff.yml`).
+## Known constraints
 
-The full official command (50 epochs × five seeds × two backends) is **not** executed in CI. Run that locally or in your own runner when validating paper numbers.
-
-## Known Constraints
-
-- The official comparison uses a fixed five-seed set: `42 123 456 789 1024`.
-- Runtime and numeric behavior can vary by `device`, `thread`, and `dtype`; effective values should be logged per run.
-- External implementations are reference-only and are not redistributed in this repository.
-- Scripts under `tda_ml/experiments/` are **non-official** and require your own checkpoints (see `configs/README.md`).
-- `run_backend_multiseed.py` multiseed backend comparison is **not** a pure distance-backend-only ablation; it compares full training pipelines, not an isolated backend switch.
-- For topological loss, **`mahalanobis`** can incorporate predicted **outlier-probability weighting** in the distance matrix; **`ellphi`** is geometry-only and requires `prob_weighting=false`.
-- Read outcomes as **two full pipelines** under the same schedule and config surface, not as isolating distance-backend effects alone.
-
-### Backend comparison: outlier-probability weighting
-
-For **topological loss**, the batched distance matrix is built per `model.topology_loss.distance_backend`. With **`mahalanobis`**, the implementation can incorporate **predicted outlier probabilities** when forming pairwise distances (see `tda_ml.topology.compute_anisotropic_distance_matrix`). With **`ellphi`**, tangency distances are computed from ellipse geometry only; **probability-based weighting is not implemented**, so the backend comparison driver explicitly sets `prob_weighting=false`. Requesting it now hard-fails rather than silently ignoring `probs` (see `tda_ml.distance_backend.compute_distance_matrix_batch`). Hyperparameters in `configs/reproduce.yaml` are shared across backends, but **the induced metric for topological loss is not identical across backends** by design: the intended read is a reproducible pipeline comparison (same data, schedule, and config surface), not a claim that both backends optimize the exact same weighted distance objective. Elliptic contact distances are left as defined by `ellphi`; no synthetic “prob-equivalent” weighting is applied on the ellphi path.
+- Fixed paper seed set: `42 123 456 789 1024`.
+- Runtime depends on device / threads / dtype; each run records a manifest.
+- For topological loss, **mahalanobis** may use outlier-probability weighting;
+  **ellphi** is geometry-only and requires `prob_weighting=false` (hard-fail
+  otherwise). Do not read backend comparison as an isolated metric swap.
 
 ## License / Attribution
 
-This project is licensed under the MIT License. See `LICENSE`.
+MIT — see `LICENSE`.
 
-External implementations are reference-only and are not redistributed in this repository.
-
-- **ellphi (training / differentiable tangency):** requires the pinned fork checked out via `./scripts/ensure_ellphi_repo.sh` (`third_party/ellphi.ref` → `ellphi_repo/`). PyPI `ellphi==0.1.2` alone does **not** include the `ellphi.grad` API used for training. Fork: [koki3070/ellphi](https://github.com/koki3070/ellphi) (based on [t-uda/ellphi](https://github.com/t-uda/ellphi)).
-- **pytorch-topological:** [aidos-lab/pytorch-topological](https://github.com/aidos-lab/pytorch-topological) via `./scripts/ensure_pytorch_topological.sh`.
-
-Upstream references:
-
-- `https://github.com/t-uda/ellphi`
-- `https://github.com/aidos-lab/pytorch-topological`
+- **ellphi (differentiable tangency):** pinned fork via
+  `./scripts/ensure_ellphi_repo.sh` (`third_party/ellphi.ref`). PyPI
+  `ellphi==0.1.2` alone lacks the training `ellphi.grad` API.
+- **pytorch-topological:** via `./scripts/ensure_pytorch_topological.sh`.

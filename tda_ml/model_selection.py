@@ -38,13 +38,31 @@ class SelectionSettings:
 
 
 def selection_settings_from_config(config) -> SelectionSettings:
-    sel_cfg = (config.get("training", {}).get("selection") or {})
-    metric = sel_cfg.get("metric", "val_topo")
+    training = config.get("training")
+    if not isinstance(training, dict):
+        raise ValueError(
+            "training must be an explicit mapping; refusing silent selection defaults"
+        )
+    sel_cfg = training.get("selection")
+    if not isinstance(sel_cfg, dict):
+        raise ValueError(
+            "training.selection must be set explicitly; refusing silent val_topo default"
+        )
+    if "metric" not in sel_cfg:
+        raise ValueError(
+            "training.selection.metric must be set explicitly; "
+            "refusing silent val_topo default"
+        )
+    metric = str(sel_cfg["metric"]).strip()
     eval_every = max(1, int(sel_cfg.get("eval_every", 1)))
-    dbscan_cfg = (sel_cfg.get("dbscan") or {})
-    backend = (
-        config.get("model", {}).get("topology_loss", {}).get("distance_backend", "mahalanobis")
-    )
+    dbscan_cfg = sel_cfg.get("dbscan") or {}
+    topo = (config.get("model") or {}).get("topology_loss") or {}
+    if "distance_backend" not in topo:
+        raise ValueError(
+            "model.topology_loss.distance_backend must be set explicitly; "
+            "refusing silent mahalanobis default in selection"
+        )
+    backend = str(topo["distance_backend"]).lower().strip()
     settings = SelectionSettings(
         metric=metric,
         eval_every=eval_every,

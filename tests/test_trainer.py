@@ -37,7 +37,8 @@ class TestTrainer(unittest.TestCase):
                 'lambda_topo': 0.1,
                 'lambda_aniso': 0.01,
                 'grad_clip_value': 1.0,
-                'visualize_every': 10
+                'visualize_every': 10,
+                'selection': {'metric': 'val_topo'},
             },
             'loss': {
                 'w_class': 1.0,
@@ -49,12 +50,15 @@ class TestTrainer(unittest.TestCase):
                 'size_mode': 'quadratic',
                 'size_ref': 1.34,
                 'size_power': 1.5,
+                'topo_eps_scale': 1.0,
+                'topo_scale_mode': 'fixed',
             },
             'model': {
                 'topology_loss': {
                     'distance_backend': 'mahalanobis',
                     'homology_dimensions': [0, 1],
                     'prob_weighting': True,
+                    'ellphi_differentiable': True,
                 }
             },
             'outputs': {
@@ -108,6 +112,8 @@ class TestTrainer(unittest.TestCase):
             "size_mode": "quadratic",
             "size_ref": 1.34,
             "size_power": 1.5,
+            "topo_eps_scale": 1.0,
+            "topo_scale_mode": "fixed",
         }
         self.config["model"]["topology_loss"]["prob_weighting"] = False
         trainer = Trainer(self.model, self.config, self.device)

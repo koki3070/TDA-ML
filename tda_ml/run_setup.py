@@ -69,9 +69,14 @@ def build_dataloaders(config, seed: int, settings: DataLoaderSettings):
     must not change.
     """
     data_cfg = config["data"]
-    train_size = data_cfg.get("train_size", 4500)
-    val_size = data_cfg.get("val_size", 500)
-    test_size = data_cfg.get("test_size", 1000)
+    for key in ("train_size", "val_size", "test_size", "batch_size"):
+        if key not in data_cfg:
+            raise ValueError(
+                f"data.{key} must be set explicitly; refusing silent default"
+            )
+    train_size = int(data_cfg["train_size"])
+    val_size = int(data_cfg["val_size"])
+    test_size = int(data_cfg["test_size"])
 
     generator = torch.Generator().manual_seed(seed)
     full_train_indices = torch.randperm(60000, generator=generator)[: train_size + val_size]
@@ -147,11 +152,9 @@ def build_dataloaders(config, seed: int, settings: DataLoaderSettings):
         outlier_mode=outlier_mode,
         allow_empty_cloud_fallback=bool(
             (config.get("reproducibility") or {}).get("allow_empty_cloud_fallback", False)
-            or data_cfg.get("allow_empty_cloud_fallback", False)
         ),
         allow_otsu_threshold_fallback=bool(
             (config.get("reproducibility") or {}).get("allow_otsu_threshold_fallback", False)
-            or data_cfg.get("allow_otsu_threshold_fallback", False)
         ),
     )
 

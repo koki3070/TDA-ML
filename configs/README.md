@@ -1,49 +1,63 @@
 # Configuration layout
 
-Canonical YAML files live **in this directory** (deep-merged with `base.yaml` by `tda_ml.config.load_config`):
+Canonical YAML files live **in this directory** (deep-merged with `base.yaml` by
+`tda_ml.config.load_config`).
+
+## 正本（公開・論文）
 
 | File | Role |
 |------|------|
-| `base.yaml` | Shared defaults; always merged first. |
-| `reproduce.yaml` | Paper / official multi-seed reproduction (`run_backend_multiseed.py`). |
-| `dev.yaml` | Small MNIST subset for local wiring checks (non-official). |
-| `prod.yaml` | Longer CPU profile (non-official). |
-| `test_fast.yaml` | Small settings for quick checks and CI smoke. |
-| `elongate_n100_no_cls_full120_teacher_local_pca.yaml` | Paper no_cls production (H1-only, local_pca teacher). |
-| `elongate_n100_no_cls_tune_local_pca_ellphi_power_mcc.yaml` | Optuna tune base for power + ellphi (W-Dist / MCC studies). |
-| `elongate_n100_no_cls_full120_baseline.yaml` | H1-only no_cls contrast with Euclidean teacher (optional table column). |
+| `base.yaml` | Shared defaults; always merged first. Declared keys only (no silent trainer defaults). |
+| `reproduce.yaml` | Secondary backend pipeline comparison (`run_backend_multiseed.py` / CI smoke). |
+| `dev.yaml` | Small MNIST subset for local wiring (non-paper). |
+| `prod.yaml` | Longer CPU profile (non-paper). |
+| `test_fast.yaml` | Quick checks / CI. |
+| `elongate_n100_no_cls_full120_teacher_local_pca.yaml` | **Paper production** (`w_class=0`, H1-only, local_pca, `aniso_mode=elongate`). |
+| `elongate_n100_no_cls_tune_local_pca_ellphi_power.yaml` | Shared Optuna tune base for **both** W-Dist and MCC studies (`config_id` is objective-neutral). |
+| `elongate_n100_no_cls_full120_baseline.yaml` | Optional Euclidean-teacher contrast column. |
 
-**Probe / ablation / dated experiment YAML** (scaleinv, topo12, raw_axes, H1 launch variants, etc.) belongs under local `configs/archive/` and is **not** part of the publishable surface. Load with `load_config("archive/<stem>")` when present.
+## 宣言済み契約 variant（主表外・Methods で主張する場合のみ）
+
+| File | Role |
+|------|------|
+| `elongate_n100_no_cls_tune_local_pca_ellphi_power_h1_neartangent_barrier.yaml` | Degeneracy guard: `aniso_mode=elongate_barrier`, `aniso_barrier_threshold=6.0`, `distance_backend=ellphi`. Opt-in via `BASE_CONFIG=...`; never an implicit swap. |
+
+## 置かないもの
+
+Probe / ablation / dated experiment YAML → local `configs/archive/` only
+(gitignored). Do not reintroduce rings / contam / raw_axes configs here.
+
+Library support without public paper YAML: `tda_ml/ring_dataset.py` (`dataset_type=thin_rings`)
+and `tda_ml/tangent_outliers.py` remain importable for opt-in Methods experiments;
+they are **not** the main-table path unless a public YAML above selects them.
 
 ## Keys read by the training stack
 
 `tda_ml.main` and `Trainer` use the following (other YAML keys are ignored).
+Missing required keys **hard-fail** (no silent method defaults).
 
 | Section | Key | Used by | Notes |
 |---------|-----|---------|--------|
 | `meta` | `config_id` | `main` | Run directory prefix `<config_id>_<timestamp>`. |
 | `model` | `point_dim`, `feature_dim` | `main` | Passed to `AnisotropicOutlierClassifier`. |
 | `model` | `threshold` | `Trainer` | Classification threshold. |
-| `model` | `topology_loss.distance_backend` | `Trainer` | `mahalanobis` or `ellphi` (explicit; no silent default). |
-| `model` | `topology_loss.homology_dimensions` | `Trainer` / topo W-Dist | Explicit list (e.g. `[0,1]` or paper `[1]`). |
-| `model` | `topology_loss.prob_weighting` | `Trainer` | Explicit bool; `ellphi` requires `false`. |
-| `model` | `topology_loss.ellphi_differentiable` | `Trainer` | Default `true`; multiseed driver reads from merged config. |
-| `loss` | `w_class`, `w_topo`, `w_aniso`, `w_size` | `Trainer` | Required under `loss.*` (`reproducibility.allow_legacy_loss_keys=false`). |
-| `loss` | `teacher_mode` | `Trainer` / topo W-Dist | Explicit (`euclidean` or `local_pca`). |
-| `loss` | `pos_weight`, `aniso_mode`, `size_mode` | `Trainer` | BCE positive weight; anisotropy / size penalty modes. |
+| `model` | `topology_loss.distance_backend` | `Trainer` | `mahalanobis` or `ellphi` (required). |
+| `model` | `topology_loss.homology_dimensions` | `Trainer` / topo W-Dist | Required list. |
+| `model` | `topology_loss.prob_weighting` | `Trainer` | Required bool; `ellphi` requires `false`. |
+| `model` | `topology_loss.ellphi_differentiable` | `Trainer` | Required bool. |
+| `loss` | `w_class`, `w_topo`, `w_aniso`, `w_size` | `Trainer` | Required under `loss.*`. |
+| `loss` | `teacher_mode` | `Trainer` / topo W-Dist | Required (`euclidean` or `local_pca`). |
+| `loss` | `topo_eps_scale`, `topo_scale_mode` | `Trainer` | Required filtration alignment. |
+| `loss` | `teacher_local_pca_*` | `Trainer` | Required when `teacher_mode=local_pca`. |
+| `loss` | `pos_weight`, `aniso_mode`, `size_mode` | `Trainer` | Mode-specific extras required when that mode is selected. |
 | `training` | `lr`, `epochs`, `grad_clip_value`, `visualize_every`, `warmup_epochs` | `main` / `Trainer` | |
-| `training` | `lambda_major`, `lambda_minor`, `lambda_size` | `Trainer` | Ellipse size loss (overrides `w_size` when set). |
-| `training` | `barrier_threshold`, `rotation_augmentation` | `Trainer` | Anisotropy barrier / data aug. |
-| `training` | `use_amp`, `amp_dtype` | `Trainer` | CUDA AMP (optional). |
-| `data` | `seed`, `train_size`, `val_size`, `test_size` | `main` | MNIST index splits (not `num_samples`). |
-| `data` | `max_points`, `num_outliers`, `batch_size`, `num_workers`, … | `main` | DataLoader / dataset. |
+| `training` | `selection.metric` | `Trainer` | Required (paper: `val_topo`). |
+| `data` | `seed`, sizes, `outlier_mode`, … | `main` | Explicit geometry; hard-fail if absent. |
 | `outputs` | `base_dir` | `main` | Parent of per-run trees. |
-| `outputs` | `log_dir`, `image_dir` | — | **Overwritten** by `main` to `<run_dir>/logs` and `/images`. |
-| `outputs` | `save_every` | `main` | Periodic checkpoint interval. |
-| `device` | | `main` | `auto`, `cpu`, `cuda`, or `mps`. |
-| `reproducibility` | `deterministic_algorithms` | `main` | Passed to `set_global_seed`. |
-| `init_checkpoint` | | `main` | Optional warm-start (top-level or via CLI). |
+| `reproducibility` | `*` | preflight / trainer | Strict defaults in `base.yaml`. |
+| `init_checkpoint` | | `main` | Optional warm-start. |
 
-## Non-official scripts
+## Non-paper scripts
 
-Modules under `tda_ml/experiments/`, `reproduce_pd_animation.py`, and `robustness_sweep.py` may require **your own checkpoints** and optional extras. They are not part of the canonical `run_backend_multiseed.py` path.
+Optional extras under `pyproject.toml` (`experiments`, `images`) support tune /
+plotting. They are not the paper production path.

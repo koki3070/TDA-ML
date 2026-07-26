@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from tda_ml.persistence import compute_bottleneck_distance, compute_w_distance
+from tda_ml.persistence import compute_w_distance
 
 
 class TestPersistenceWasserstein(unittest.TestCase):
@@ -24,12 +24,6 @@ class TestPersistenceWasserstein(unittest.TestCase):
 
     def test_both_empty_point_clouds(self):
         self.assertEqual(compute_w_distance([], []), 0.0)
-
-    def test_bottleneck_empty_pred_not_sentinel(self):
-        circle = self._circle_points()
-        b = compute_bottleneck_distance([], circle)
-        self.assertTrue(np.isfinite(b))
-        self.assertLess(b, 10.0)
 
 
 if __name__ == "__main__":

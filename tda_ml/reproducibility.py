@@ -15,6 +15,7 @@ from tda_ml.numerical_eps import (
     MIN_ELLPHI_CENTER_SEPARATION,
     NUMERICAL_EPS,
     PCA_RIDGE_EPS,
+    ZERO_PAD_ABS_SUM,
 )
 
 DEFAULT_DBSCAN_EPS_LINSPACE = (0.15, 1.5, 15)
@@ -263,6 +264,7 @@ def build_reproducibility_manifest_fields(
             "PCA_RIDGE_EPS": PCA_RIDGE_EPS,
             "EIGENVALUE_FLOOR": EIGENVALUE_FLOOR,
             "INLIER_PROB_MIN": INLIER_PROB_MIN,
+            "ZERO_PAD_ABS_SUM": ZERO_PAD_ABS_SUM,
         },
         "ellphi_repo": build_ellphi_repo_manifest_fields(project_root),
     }

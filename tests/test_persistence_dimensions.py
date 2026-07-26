@@ -76,12 +76,48 @@ class TestPersistenceDimensions(unittest.TestCase):
                     "prob_weighting": False,
                 }
             },
-            "loss": {"teacher_mode": "local_pca"},
+            "loss": {
+                "teacher_mode": "local_pca",
+                "teacher_local_pca_k": 10,
+                "teacher_local_pca_normalize_axes": True,
+                "topo_eps_scale": 1.0,
+                "topo_scale_mode": "fixed",
+            },
         }
         opts = topo_wdist_options_from_config(cfg)
         self.assertEqual(opts.homology_dimensions, (1,))
         self.assertEqual(opts.teacher_mode, "local_pca")
         self.assertFalse(opts.prob_weighting)
+
+    def test_topo_wdist_options_hard_fail_on_missing_method_fields(self):
+        base = {
+            "model": {
+                "topology_loss": {
+                    "homology_dimensions": [1],
+                    "distance_backend": "mahalanobis",
+                    "prob_weighting": False,
+                }
+            },
+            "loss": {
+                "teacher_mode": "local_pca",
+                "teacher_local_pca_k": 10,
+                "teacher_local_pca_normalize_axes": True,
+                "topo_eps_scale": 1.0,
+                "topo_scale_mode": "fixed",
+            },
+        }
+        for key in (
+            "topo_eps_scale",
+            "topo_scale_mode",
+            "teacher_local_pca_k",
+            "teacher_local_pca_normalize_axes",
+        ):
+            cfg = {
+                "model": {"topology_loss": dict(base["model"]["topology_loss"])},
+                "loss": {k: v for k, v in base["loss"].items() if k != key},
+            }
+            with self.assertRaisesRegex(ValueError, key):
+                topo_wdist_options_from_config(cfg)
 
     def test_topological_loss_runs_with_h1_only(self):
         theta = torch.linspace(0.0, 2.0 * torch.pi, 9)[:-1]

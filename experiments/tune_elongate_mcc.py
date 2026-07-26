@@ -158,7 +158,7 @@ def make_objective(args: argparse.Namespace):
 
         ckpt_name, ckpt_epoch, val_topo = resolve_val_topo_checkpoint(run_dir)
         topo_options = topo_wdist_options_from_config(cfg)
-        model = load_model_from_run(run_dir, cfg, device, checkpoint_name=ckpt_name)
+        model = load_model_from_run(run_dir, cfg, device)
         loader = build_split_loader(cfg, "val", device)
 
         grid = evaluate_model_grid(
@@ -202,7 +202,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument(
         "--base-config",
-        default="elongate_n100_no_cls_tune_local_pca_ellphi_power_mcc",
+        default="elongate_n100_no_cls_tune_local_pca_ellphi_power",
     )
     p.add_argument("--n-trials", type=int, default=24)
     p.add_argument(

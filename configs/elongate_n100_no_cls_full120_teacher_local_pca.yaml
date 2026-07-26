@@ -32,6 +32,8 @@ loss:
   teacher_mode: local_pca
   teacher_local_pca_k: 10
   teacher_local_pca_normalize_axes: true
+  topo_eps_scale: 1.0
+  topo_scale_mode: fixed
 
 training:
   lr: 0.000158

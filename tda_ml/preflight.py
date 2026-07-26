@@ -278,7 +278,12 @@ def preflight_training_config(
                 "loss.aniso_barrier_threshold must be set explicitly for "
                 f"aniso_mode={aniso_mode!r}; refusing silent 6.0 default"
             )
-    ellphi_diff = bool(topo.get("ellphi_differentiable", True))
+    if "ellphi_differentiable" not in topo:
+        raise ValueError(
+            "model.topology_loss.ellphi_differentiable must be set explicitly; "
+            "refusing silent true default"
+        )
+    ellphi_diff = bool(topo["ellphi_differentiable"])
     if backend == "ellphi":
         _require_import("ellphi", lambda: __import__("ellphi"))
         assert_ellphi_repo_matches_pin(project_root=root)
@@ -567,12 +572,13 @@ def preflight_baseline_eval(
     return preview
 
 
-def preflight_paper_eval_run_dir(run_dir: Path, *, checkpoint_name: str = "best_model.pth") -> None:
+def preflight_paper_eval_run_dir(run_dir: Path) -> None:
+    """Require ``best_model.pth`` (val_topo); no alternate checkpoint names."""
+    from tda_ml.checkpoint_io import resolve_val_topo_checkpoint
+
     if not run_dir.is_dir():
         raise FileNotFoundError(f"run-dir not found: {run_dir}")
-    ckpt = run_dir / checkpoint_name
-    if not ckpt.is_file():
-        raise FileNotFoundError(f"Checkpoint not found: {ckpt}")
+    resolve_val_topo_checkpoint(run_dir)
 
 
 def os_access_writable(path: Path) -> bool:

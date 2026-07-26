@@ -28,7 +28,11 @@ from typing import Any
 import numpy as np
 import torch
 
-from tda_ml.checkpoint_io import extract_model_state_dict, load_torch_checkpoint
+from tda_ml.checkpoint_io import (
+    extract_model_state_dict,
+    load_torch_checkpoint,
+    resolve_val_topo_checkpoint,
+)
 from tda_ml.config import deep_update, load_config, model_kwargs_from_config
 from tda_ml.data_loader import NoisyMNISTDataset, create_data_loader
 from tda_ml.dbscan_eval import evaluate_model_grid, iter_cloud_predictions
@@ -41,6 +45,14 @@ from tda_ml.supervised_diagnostics import git_revision
 from tda_ml.topo_wdist import TopoWdistOptions, topo_wdist_options_from_config
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _require_data_key(data_cfg: dict[str, Any], key: str) -> Any:
+    if key not in data_cfg:
+        raise ValueError(
+            f"data.{key} must be set explicitly; refusing silent default"
+        )
+    return data_cfg[key]
 
 
 @dataclass
@@ -64,11 +76,6 @@ class SplitMetrics:
     dbscan_eps: float | None = None
     dbscan_min_samples: int | None = None
     backend: str = "ellphi"
-
-
-def _valid_clean_inliers(clean_pc: np.ndarray) -> np.ndarray:
-    mask = np.abs(clean_pc).sum(axis=1) > 1e-6
-    return clean_pc[mask]
 
 
 def dbscan_labels_to_outlier_pred(labels: np.ndarray) -> np.ndarray:
@@ -124,20 +131,20 @@ def _aggregate_cloud_metrics(rows: list[CloudMetrics]) -> tuple[float, float, fl
 
 def build_split_loader(config: dict[str, Any], split: str, device: torch.device):
     data_cfg = config["data"]
-    seed = int(data_cfg.get("seed", 42))
+    seed = int(_require_data_key(data_cfg, "seed"))
     set_global_seed(seed, deterministic_algorithms=False)
 
-    train_size = int(data_cfg.get("train_size", 4500))
-    val_size = int(data_cfg.get("val_size", 500))
-    test_size = int(data_cfg.get("test_size", 1000))
+    train_size = int(_require_data_key(data_cfg, "train_size"))
+    val_size = int(_require_data_key(data_cfg, "val_size"))
+    test_size = int(_require_data_key(data_cfg, "test_size"))
     generator = torch.Generator().manual_seed(seed)
     full_train_indices = torch.randperm(60000, generator=generator)[: train_size + val_size]
     val_indices = full_train_indices[train_size:]
     test_indices = torch.randperm(10000, generator=generator)[:test_size]
 
-    num_workers = int(data_cfg.get("num_workers", 0))
-    pin_memory = bool(data_cfg.get("pin_memory", device.type == "cuda"))
-    batch_size = int(data_cfg.get("batch_size", 64))
+    num_workers = int(_require_data_key(data_cfg, "num_workers"))
+    pin_memory = bool(_require_data_key(data_cfg, "pin_memory"))
+    batch_size = int(_require_data_key(data_cfg, "batch_size"))
 
     if split == "val":
         indices = val_indices
@@ -251,18 +258,16 @@ def load_model_from_run(
     run_dir: Path,
     config: dict[str, Any],
     device: torch.device,
-    checkpoint_name: str = "best_model.pth",
 ) -> AnisotropicOutlierClassifier:
-    ckpt_path = run_dir / checkpoint_name
-    if not ckpt_path.is_file():
-        raise FileNotFoundError(f"Missing checkpoint: {ckpt_path}")
+    """Load ``best_model.pth`` (val_topo) only; hard-fail on missing or partial weights."""
+    ckpt_name, _, _ = resolve_val_topo_checkpoint(run_dir)
+    ckpt_path = run_dir / ckpt_name
     model = AnisotropicOutlierClassifier(**model_kwargs_from_config(config))
     ckpt = load_torch_checkpoint(str(ckpt_path), map_location="cpu")
-    model.load_state_dict(extract_model_state_dict(ckpt), strict=False)
+    model.load_state_dict(extract_model_state_dict(ckpt), strict=True)
     model.to(device)
     model.eval()
     return model
-
 
 
 def evaluate_split(
@@ -276,11 +281,10 @@ def evaluate_split(
     eps_values: list[float] | None = None,
     min_samples_values: list[int] | None = None,
     backend: str = "ellphi",
-    checkpoint_name: str = "best_model.pth",
     tag: str | None = None,
 ) -> SplitMetrics:
     loader = build_split_loader(config, split, device)
-    model = load_model_from_run(run_dir, config, device, checkpoint_name=checkpoint_name)
+    model = load_model_from_run(run_dir, config, device)
     topo_options = topo_wdist_options_from_config(config)
     rep = reproducibility_settings(config)
     log_dir = run_dir / "logs"
@@ -432,12 +436,6 @@ def parse_args() -> argparse.Namespace:
         help="DBSCAN backend for MCC (paper protocol default: mahalanobis).",
     )
     p.add_argument(
-        "--checkpoint-name",
-        type=str,
-        default="best_model.pth",
-        help="Checkpoint filename inside run-dir (e.g. final_model.pth).",
-    )
-    p.add_argument(
         "--eps-values",
         type=float,
         nargs="+",
@@ -473,7 +471,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     run_dir = args.run_dir.resolve()
-    preflight_paper_eval_run_dir(run_dir, checkpoint_name=args.checkpoint_name)
+    preflight_paper_eval_run_dir(run_dir)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     config = load_run_config(run_dir, args.base_config, args.seed)
@@ -501,7 +499,6 @@ def main() -> int:
         eps_values=args.eps_values,
         min_samples_values=args.min_samples_values,
         backend=args.backend,
-        checkpoint_name=args.checkpoint_name,
         tag=args.tag,
     )
 
@@ -516,7 +513,7 @@ def main() -> int:
                     "eps": metrics.dbscan_eps,
                     "min_samples": metrics.dbscan_min_samples,
                     "backend": metrics.backend,
-                    "checkpoint_name": args.checkpoint_name,
+                    "checkpoint_name": "best_model.pth",
                     "mean_val_mcc_dbscan": metrics.mcc,
                     "selection": "max mean cloud MCC on validation split",
                 },
@@ -531,7 +528,7 @@ def main() -> int:
         "source_revision": git_revision(REPO_ROOT),
         "run_dir": str(run_dir),
         "split": args.split,
-        "checkpoint_name": args.checkpoint_name,
+        "checkpoint_name": "best_model.pth",
         **asdict(metrics),
     }
     out_path.write_text(json.dumps(payload, indent=2) + "\n")

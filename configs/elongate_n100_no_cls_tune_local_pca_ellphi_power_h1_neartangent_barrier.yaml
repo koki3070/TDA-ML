@@ -1,6 +1,7 @@
 # H1-only tune on NEAR-tangent outliers with the elongate_barrier degeneracy guard.
-# Identical to elongate_n100_no_cls_tune_local_pca_ellphi_power_h1_neartangent
-# except loss.aniso_mode: elongate_barrier (+ explicit aniso_barrier_threshold).
+# Same stack as elongate_n100_no_cls_tune_local_pca_ellphi_power, plus
+# near-tangent outlier data and loss.aniso_mode: elongate_barrier
+# (+ explicit aniso_barrier_threshold).
 #
 # Why: on near-tangent data, plain `elongate` rewards minor/major -> 0 with no
 # counterweight; by epoch 10-20 minor semi-axes collapsed to ~1e-5 (aspect
@@ -19,7 +20,7 @@ model:
   threshold: 0.5
   topology_loss:
     metric_type: "anisotropic"
-    distance_backend: "mahalanobis"  # overridden to ellphi by tune script
+    distance_backend: "ellphi"
     ellphi_differentiable: true
     prob_weighting: false
     homology_dimensions: [1]
@@ -38,6 +39,8 @@ loss:
   teacher_mode: local_pca
   teacher_local_pca_k: 10
   teacher_local_pca_normalize_axes: true
+  topo_eps_scale: 1.0
+  topo_scale_mode: fixed
 
 training:
   lr: 0.000158

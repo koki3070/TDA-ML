@@ -92,28 +92,49 @@ def topo_wdist_options_from_config(config: dict[str, Any]) -> TopoWdistOptions:
             "(or training.teacher_mode); refusing silent euclidean default"
         )
 
-    max_pts = training_cfg.get("topo_loss_max_points", loss_cfg.get("topo_loss_max_points"))
-    return TopoWdistOptions(
-        teacher_mode=str(teacher_mode).strip().lower(),
-        distance_backend=str(topo_cfg["distance_backend"]).lower().strip(),
-        teacher_local_pca_k=int(
+    teacher_mode_norm = str(teacher_mode).strip().lower()
+
+    def _require_loss_key(key: str) -> Any:
+        if key in loss_cfg:
+            return loss_cfg[key]
+        if key in training_cfg:
+            return training_cfg[key]
+        raise ValueError(
+            f"topo W-Dist requires explicit loss.{key} "
+            "(or training fallback key); refusing silent default"
+        )
+
+    eps_scale = float(_require_loss_key("topo_eps_scale"))
+    scale_mode = str(_require_loss_key("topo_scale_mode")).strip().lower()
+
+    if teacher_mode_norm == "local_pca":
+        teacher_local_pca_k = int(_require_loss_key("teacher_local_pca_k"))
+        teacher_local_pca_normalize_axes = bool(
+            _require_loss_key("teacher_local_pca_normalize_axes")
+        )
+    else:
+        # Euclidean teacher never reads the PCA fields; keep declared defaults
+        # for the dataclass without allowing them to leak into local_pca runs.
+        teacher_local_pca_k = int(
             loss_cfg.get(
-                "teacher_local_pca_k",
-                training_cfg.get("teacher_local_pca_k", 10),
+                "teacher_local_pca_k", training_cfg.get("teacher_local_pca_k", 10)
             )
-        ),
-        teacher_local_pca_normalize_axes=bool(
+        )
+        teacher_local_pca_normalize_axes = bool(
             loss_cfg.get(
                 "teacher_local_pca_normalize_axes",
                 training_cfg.get("teacher_local_pca_normalize_axes", True),
             )
-        ),
-        eps_scale=float(
-            loss_cfg.get("topo_eps_scale", training_cfg.get("topo_eps_scale", 1.0))
-        ),
-        scale_mode=str(
-            loss_cfg.get("topo_scale_mode", training_cfg.get("topo_scale_mode", "fixed"))
-        ).strip().lower(),
+        )
+
+    max_pts = training_cfg.get("topo_loss_max_points", loss_cfg.get("topo_loss_max_points"))
+    return TopoWdistOptions(
+        teacher_mode=teacher_mode_norm,
+        distance_backend=str(topo_cfg["distance_backend"]).lower().strip(),
+        teacher_local_pca_k=teacher_local_pca_k,
+        teacher_local_pca_normalize_axes=teacher_local_pca_normalize_axes,
+        eps_scale=eps_scale,
+        scale_mode=scale_mode,
         max_points=int(max_pts) if max_pts is not None else None,
         prob_weighting=bool(topo_cfg["prob_weighting"]),
         homology_dimensions=normalize_homology_dimensions(

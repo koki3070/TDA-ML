@@ -25,7 +25,7 @@ class TestTuneTrialConfig(unittest.TestCase):
 
     def test_canonical_power_tune_base(self):
         cfg = build_wdist_trial(
-            "elongate_n100_no_cls_tune_local_pca_ellphi_power_mcc",
+            "elongate_n100_no_cls_tune_local_pca_ellphi_power",
             w_aniso=0.1,
             w_size=0.2,
             w_topo=0.3,
@@ -46,7 +46,7 @@ class TestTuneTrialConfig(unittest.TestCase):
 
     def test_power_tune_preserves_h1_hard_fail_stack(self):
         cfg = build_wdist_trial(
-            "elongate_n100_no_cls_tune_local_pca_ellphi_power_mcc",
+            "elongate_n100_no_cls_tune_local_pca_ellphi_power",
             w_aniso=0.1,
             w_size=0.2,
             w_topo=0.3,
@@ -68,7 +68,7 @@ class TestTuneTrialConfig(unittest.TestCase):
         from tda_ml.config import load_config
 
         divergent = load_config(
-            "elongate_n100_no_cls_tune_local_pca_ellphi_power_mcc",
+            "elongate_n100_no_cls_tune_local_pca_ellphi_power",
             project_root=REPO,
         )
         divergent["model"]["topology_loss"]["homology_dimensions"] = [0, 1]
@@ -133,7 +133,7 @@ class TestTuneTrialConfig(unittest.TestCase):
 
     def test_mcc_builder_forces_homology_h1(self):
         cfg = build_mcc_trial(
-            "elongate_n100_no_cls_tune_local_pca_ellphi_power_mcc",
+            "elongate_n100_no_cls_tune_local_pca_ellphi_power",
             w_aniso=0.1,
             w_size=0.2,
             w_topo=0.3,

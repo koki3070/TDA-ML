@@ -125,7 +125,8 @@ def aggregate_row(
         "wdist_std": sample_std(wdist),
         "notes": (
             f"{n}/{len(expected_seeds)} seeds; fixed tune weights from {expected_tune}; "
-            "30ep val_topo ckpt; maha DBSCAN eval"
+            "30ep val_topo ckpt; maha DBSCAN eval; "
+            "wdist_* are diagnostics only (not main-table columns)"
         ),
     }
 

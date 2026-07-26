@@ -134,12 +134,25 @@ class Trainer:
                 "loss.size_mode must be set explicitly; refusing silent quadratic default"
             )
         self.size_mode = str(size_mode_raw).strip().lower()
-        self.size_barrier_radius = float(
-            loss_cfg.get(
-                "size_barrier_radius",
-                training_cfg.get("size_barrier_radius", 1.5),
+        if self.size_mode == "barrier":
+            if "size_barrier_radius" not in loss_cfg and "size_barrier_radius" not in training_cfg:
+                raise ValueError(
+                    "loss.size_barrier_radius must be set explicitly for "
+                    "size_mode='barrier'; refusing silent 1.5 default"
+                )
+            self.size_barrier_radius = float(
+                loss_cfg.get(
+                    "size_barrier_radius",
+                    training_cfg.get("size_barrier_radius"),
+                )
             )
-        )
+        else:
+            self.size_barrier_radius = float(
+                loss_cfg.get(
+                    "size_barrier_radius",
+                    training_cfg.get("size_barrier_radius", 1.5),
+                )
+            )
         if "size_ref" not in loss_cfg and "size_ref" not in training_cfg:
             raise ValueError(
                 "loss.size_ref must be set explicitly; refusing silent 1.34 default"
@@ -154,12 +167,25 @@ class Trainer:
         self.size_power = float(
             loss_cfg.get("size_power", training_cfg.get("size_power"))
         )
-        self.size_softplus_beta = float(
-            loss_cfg.get(
-                "size_softplus_beta",
-                training_cfg.get("size_softplus_beta", 8.0),
+        if self.size_mode == "softplus":
+            if "size_softplus_beta" not in loss_cfg and "size_softplus_beta" not in training_cfg:
+                raise ValueError(
+                    "loss.size_softplus_beta must be set explicitly for "
+                    "size_mode='softplus'; refusing silent 8.0 default"
+                )
+            self.size_softplus_beta = float(
+                loss_cfg.get(
+                    "size_softplus_beta",
+                    training_cfg.get("size_softplus_beta"),
+                )
             )
-        )
+        else:
+            self.size_softplus_beta = float(
+                loss_cfg.get(
+                    "size_softplus_beta",
+                    training_cfg.get("size_softplus_beta", 8.0),
+                )
+            )
         logger.info(
             "Anisotropy penalty mode: %s (barrier_threshold=%s)",
             self.aniso_mode,
@@ -208,30 +234,71 @@ class Trainer:
                 "loss.teacher_mode must be set explicitly; refusing silent euclidean default"
             )
         self.distance_backend = str(_topo["distance_backend"]).lower().strip()
-        self.ellphi_differentiable = bool(_topo.get("ellphi_differentiable", True))
+        if "ellphi_differentiable" not in _topo:
+            raise ValueError(
+                "model.topology_loss.ellphi_differentiable must be set explicitly; "
+                "refusing silent true default"
+            )
+        self.ellphi_differentiable = bool(_topo["ellphi_differentiable"])
         self.prob_weighting = bool(_topo["prob_weighting"])
         self.homology_dimensions = _topo["homology_dimensions"]
         # Filtration-unit alignment for the topology loss (see TopologicalLoss).
-        # Legacy knob `training.topo_eps_scale` (v73=0.7022); also accept loss.topo_eps_scale.
+        if "topo_eps_scale" not in loss_cfg and "topo_eps_scale" not in training_cfg:
+            raise ValueError(
+                "loss.topo_eps_scale (or training.topo_eps_scale) must be set "
+                "explicitly; refusing silent 1.0 default"
+            )
+        if "topo_scale_mode" not in loss_cfg and "topo_scale_mode" not in training_cfg:
+            raise ValueError(
+                "loss.topo_scale_mode (or training.topo_scale_mode) must be set "
+                "explicitly; refusing silent 'fixed' default"
+            )
         self.topo_eps_scale = float(
-            loss_cfg.get("topo_eps_scale", training_cfg.get("topo_eps_scale", 1.0))
+            loss_cfg.get("topo_eps_scale", training_cfg.get("topo_eps_scale"))
         )
         self.topo_scale_mode = str(
-            loss_cfg.get("topo_scale_mode", training_cfg.get("topo_scale_mode", "fixed"))
+            loss_cfg.get("topo_scale_mode", training_cfg.get("topo_scale_mode"))
         ).strip().lower()
         self.teacher_mode = str(teacher_raw).strip().lower()
-        self.teacher_local_pca_k = int(
-            loss_cfg.get(
-                "teacher_local_pca_k",
-                training_cfg.get("teacher_local_pca_k", 10),
+        if self.teacher_mode == "local_pca":
+            if "teacher_local_pca_k" not in loss_cfg and "teacher_local_pca_k" not in training_cfg:
+                raise ValueError(
+                    "loss.teacher_local_pca_k must be set explicitly when "
+                    "teacher_mode='local_pca'; refusing silent 10 default"
+                )
+            if (
+                "teacher_local_pca_normalize_axes" not in loss_cfg
+                and "teacher_local_pca_normalize_axes" not in training_cfg
+            ):
+                raise ValueError(
+                    "loss.teacher_local_pca_normalize_axes must be set explicitly "
+                    "when teacher_mode='local_pca'; refusing silent true default"
+                )
+            self.teacher_local_pca_k = int(
+                loss_cfg.get(
+                    "teacher_local_pca_k",
+                    training_cfg.get("teacher_local_pca_k"),
+                )
             )
-        )
-        self.teacher_local_pca_normalize_axes = bool(
-            loss_cfg.get(
-                "teacher_local_pca_normalize_axes",
-                training_cfg.get("teacher_local_pca_normalize_axes", True),
+            self.teacher_local_pca_normalize_axes = bool(
+                loss_cfg.get(
+                    "teacher_local_pca_normalize_axes",
+                    training_cfg.get("teacher_local_pca_normalize_axes"),
+                )
             )
-        )
+        else:
+            self.teacher_local_pca_k = int(
+                loss_cfg.get(
+                    "teacher_local_pca_k",
+                    training_cfg.get("teacher_local_pca_k", 10),
+                )
+            )
+            self.teacher_local_pca_normalize_axes = bool(
+                loss_cfg.get(
+                    "teacher_local_pca_normalize_axes",
+                    training_cfg.get("teacher_local_pca_normalize_axes", True),
+                )
+            )
         logger.info(
             "Topological distance backend: %s%s (prob_weighting=%s, homology_dimensions=%s, scale_mode=%s, eps_scale=%s, teacher_mode=%s%s)",
             self.distance_backend,

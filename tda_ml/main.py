@@ -247,7 +247,7 @@ def main(config_name=None, config=None, trial=None, config_overrides=None):
         if init_checkpoint:
             logger.info("Loading initial weights from %s", init_checkpoint)
             checkpoint = load_torch_checkpoint(init_checkpoint, map_location=device)
-            model.load_state_dict(extract_model_state_dict(checkpoint), strict=False)
+            model.load_state_dict(extract_model_state_dict(checkpoint), strict=True)
 
         log_dir = config["outputs"]["log_dir"]
         metrics_path = os.path.join(log_dir, "metrics.csv")

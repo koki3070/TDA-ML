@@ -10,18 +10,58 @@
 ### 論文比較（ellphi + power 二目的）で使う `experiments/`
 
 **論文主表の提案:** W-Dist tune 重みの 30ep 5-seed（`run_teacher_local_pca_power_30ep_multiseed.sh wdist`）。
-**主張:** Euclidean DBSCAN / ADBSCAN と **同程度の外れ値除去性能**（MCC / G-Mean）。主表に Topo W. 列は載せない。
+**主張:** Euclidean DBSCAN / ADBSCAN と **同程度の外れ値除去性能**（MCC / G-Mean；5 seed の mean ± sample std による**記述的**比較。同等性検定は行わない）。主表に Topo W. 列は載せない。
+**比較の非対称:** ADBSCAN は学習なしの局所 PCA 楕円ベースライン。提案法は同一データで 30ep 学習する（計算資源・パラメータ更新は対等ではない）。
 **正本 config:** `elongate_n100_no_cls_full120_teacher_local_pca`（`w_class=0`, `homology_dimensions=[1]`, `aniso_mode=elongate`）。
 出力先は `WDIST_OUT` / `MCC_OUT` / `LOG_ROOT`（既定: `outputs/supervised/pwr30_*`）で明示する（生成物は git に含めない）。
 
 | 区分 | パス |
 |------|------|
 | 本番 5-seed | `run_teacher_local_pca_power_30ep_multiseed.sh`, `run_teacher_local_pca_power_30ep.py`, `aggregate_power_30ep_multiseed.py` |
-| paper eval | `evaluate_paper_protocol.py` |
+| paper eval | `evaluate_paper_protocol.py`（`best_model.pth` のみ） |
 | ベースライン | `evaluate_paper_baselines.py` |
 | チューニング（重みの出所） | `tune_elongate_wdist.py`, `tune_elongate_mcc.py`, `run_tune_local_pca_power_*` |
 
 **実行記録:** 各 run の `source_revision`（git HEAD）は `logs/run_manifest.json` および `paper_metrics_*.json` に記録。未コミットのまま実行した場合、リモート clone では数値が再現できない。
+
+### 正本の起動（学習 → paper eval）
+
+checkpoint は **`best_model.pth`（`selection=val_topo`）のみ**。欠落は hard-fail（サイレント代替なし）。YAML 役割は `configs/README.md`。
+
+**1. Tune（主表は W-Dist；YAML の data.seed=42。Optuna sampler seed は worker ごとに異なる）**
+
+```bash
+MODE=wdist bash experiments/run_tune_local_pca_power_objectives.sh
+```
+
+**2. 本番 30ep × 5-seed（tune JSON 必須）→ 内部で paper eval**
+
+```bash
+bash experiments/run_teacher_local_pca_power_30ep_multiseed.sh wdist
+```
+
+**3. ベースライン（ADBSCAN 等）**
+
+```bash
+uv run python experiments/evaluate_paper_baselines.py \
+  --base-config elongate_n100_no_cls_full120_teacher_local_pca \
+  --out-dir outputs/paper_baselines
+```
+
+単一 seed・手動 eval:
+
+```bash
+uv run python experiments/run_teacher_local_pca_power_30ep.py \
+  --tune-json outputs/tune/pwr_wdist/best_elongate_wdist_ellphi.json \
+  --seed 42
+
+uv run python experiments/evaluate_paper_protocol.py \
+  --run-dir outputs/supervised/.../pwr_s42_<stamp> \
+  --base-config elongate_n100_no_cls_full120_teacher_local_pca \
+  --split val
+```
+
+運用補助: `experiments/launch_detached_screen.sh`（screen 経由の長時間ジョブ）。論文主表の入口ではない。
 
 ### W-Dist 契約（場所ごとの定義）
 
@@ -33,7 +73,7 @@
 
 主表・チューニングの preflight は `homology_dimensions=[1]`、`teacher_mode=local_pca`、`prob_weighting=false`、`aniso_mode=elongate`、`distance_backend=ellphi`、`size_mode=power`、`w_class=0.0`、`teacher_local_pca_k=10`、`teacher_local_pca_normalize_axes=true` の明示を要求する。欠落や不一致は実行前に hard-fail する。本番 30ep は `--tune-json`（H1-only Optuna best）必須で、YAML 埋め込みの旧重みでは起動しない。
 
-**退化ガード variant（opt-in）:** near-tangent データでは素の `elongate` が短軸→0（epoch 15 で短半径 ~1e-5、アスペクト比 ~350）まで潰し、ellphi の tangency 計算が hard-fail する（stage-2 tune 16 条件中 15 失敗）。この対策として `aniso_mode: elongate_barrier`（elongate 報酬 + 閾値超過アスペクト比への二次バリア）を **config で明示宣言する第 2 の契約 variant**（`PAPER_NO_CLS_BARRIER_CONTRACT`、`aniso_barrier_threshold=6.0` 必須）として定義する。暗黙の切替・clamp は行わず、variant は base config の `loss.aniso_mode` 宣言から `paper_aniso_fields()` 経由で tune／本番へ伝播し、STUDY_PREFLIGHT・tune JSON・run manifest（`paper_no_cls_contract`／`loss_overrides`）に記録される。集計は `aggregate_power_30ep_multiseed.py --aniso-variant elongate_barrier` で契約一致を検証する。
+**退化ガード variant（主表外・Methods opt-in）:** near-tangent データでは素の `elongate` が短軸→0 まで潰し、ellphi tangency が hard-fail し得る。対策として `aniso_mode: elongate_barrier`（`PAPER_NO_CLS_BARRIER_CONTRACT`、`aniso_barrier_threshold=6.0`、`distance_backend=ellphi`）を **YAML で明示したときだけ**使う。公開の tune 入口は `elongate_n100_no_cls_tune_local_pca_ellphi_power_h1_neartangent_barrier`（`BASE_CONFIG=...`）。暗黙の切替はしない。主表の ADBSCAN 比較には使わない。
 
 ## 環境
 
@@ -59,11 +99,12 @@
 - MNIST は git にコミットしません（`data/` は無視対象）。
 - 初回の学習またはデータセットアクセス時に、`torchvision` 経由で **`./data`** 以下にダウンロードされます（`configs/reproduce.yaml` を前提とした設定が典型です）。
 - 初回はインターネットに到達できるようにするか、キャッシュ済みの MNIST を自分で `./data` に置いてください。
-- 設定 YAML の役割分担は **`configs/README.md`**（正本 5 本）を参照。旧設定はローカルで `configs/archive/` に置けるが、公開クローンには同梱されない。
+- 設定 YAML の役割分担は **`configs/README.md`** を参照（共有プロファイル + 論文用 `elongate_n100_no_cls_*`）。旧設定はローカルで `configs/archive/` に置けるが、公開クローンには同梱されない。
 
 ## チェックポイントと実行出力
 
-- `experiments/run_backend_multiseed.py` が内部で読み込む **`tda_ml/main.py`** の学習処理により、実行ごとのディレクトリ以下に成果物が書き出されます（README の「Expected artifacts」参照）。典型例は `logs/metrics.csv`、`logs/runtime_profile.json`、`best_model.pth`、可視化が有効なら `images/` などです。
+- 論文・backend 比較とも、学習成果物は実行ごとのディレクトリ以下に書き出されます。典型例は `logs/metrics.csv`、`logs/runtime_profile.json`、`logs/run_manifest.json`、`best_model.pth`、可視化が有効なら `images/` などです。
+- paper eval / tune の評価 checkpoint は **`best_model.pth` のみ**（`resolve_val_topo_checkpoint`）。別名への切替は不可。
 - **`outputs/`** は git の対象外です。論文用に実行ツリーを保存する場合は、原稿や付録で **コミットハッシュ・シード・使用した設定名** とあわせてパスを示すと追跡しやすいです。`progress_summary.csv` には絶対パスが入るため、共有時のプライバシーに注意してください。
 
 ## 厳格な再現性インフラ（preflight / manifest）
@@ -119,9 +160,9 @@ opt-in fallback を有効にした場合、`run_manifest.json` の `fallbacks` �
 
 `tda_ml/run_paths.py` が `outputs/supervised` / `outputs/supervised_no_cls` / `outputs/tune` 配下の slug・タイムスタンプ命名を統一します。新規実験フォルダは `scripts/new_experiment.sh` を使用してください。
 
-## 数値再現の公式手順
+## 副次: バックエンドパイプライン比較（論文主表ではない）
 
-**公式**のマルチシード・バックエンド比較は次のとおりです。
+`run_backend_multiseed.py` は **二次比較 / CI smoke** 用です。論文主表の入口ではありません。
 
 ```bash
 uv run python experiments/run_backend_multiseed.py \
@@ -132,7 +173,7 @@ uv run python experiments/run_backend_multiseed.py \
   --out-base outputs/backend_compare
 ```
 
-再開の挙動、ロックファイル、CSV の意味は `README.md` に書いてあります。
+再開・ロック・期待成果物は `README.md` の Backend pipeline comparison 節を参照。
 
 ### バックエンド比較と outlier 確率の重み（非対称）
 
@@ -142,7 +183,7 @@ uv run python experiments/run_backend_multiseed.py \
 
 位相損失用の距離行列は `model.topology_loss.distance_backend` ごとに別定義です。**`mahalanobis`** では、学習で予測した **outlier 確率 `probs`** を距離の重み付けに織り込めます（`tda_ml.topology.compute_anisotropic_distance_matrix`）。**`ellphi`** では楕円の接触距離のみを用い、`run_backend_multiseed.py` が `prob_weighting=false` を明示します。未実装の確率重みを要求すると `tda_ml.distance_backend.compute_distance_matrix_batch` が hard-fail します。
 
-したがって、`run_backend_multiseed.py` で同じ YAML を回しても、**位相損失が見ている距離空間はバックエンド間で同一ではありません**。ここでは「同一のデータ・スケジュール・設定表面での再現パイプライン比較」を意図しており、**両バックエンドが数学的に完全に同型の重み付き距離目的関数を共有する**という読み方はしません。`ellphi` 側に Mahalanobis の確率重みに相当する項を無理に足す予定はなく、比較の解釈は本節および `README.md` の英語節（*Backend comparison: outlier-probability weighting*）に従ってください。
+したがって、`run_backend_multiseed.py` で同じ YAML を回しても、**位相損失が見ている距離空間はバックエンド間で同一ではありません**。ここでは「同一のデータ・スケジュール・設定表面での再現パイプライン比較」を意図しており、**両バックエンドが数学的に完全に同型の重み付き距離目的関数を共有する**という読み方はしません。`ellphi` 側に Mahalanobis の確率重みに相当する項を無理に足す予定はなく、比較の解釈は本節および `README.md` の Known constraints に従ってください。
 
 ### ellphi + power：二目的チューニング（実験メモ）
 
@@ -176,23 +217,27 @@ b_i = b_{i,\mathrm{base}}\, e^{\Delta b_i},\quad
 
 clip や sigmoid による軸倍率の暗黙クリップは行わない。ellphi 等で退化が起きた run は `run_status: failed` として記録する（[Computational Reproducibility skill](https://github.com/t-uda/skills/blob/main/skills/computational-reproducibility/SKILL.md)）。
 
-**正則化（`tda_ml/losses.py`）**
+**正則化（`tda_ml/losses.py`）** — 主表は `size_mode: power`:
 
 \[
-\mathcal{L}_{\mathrm{size}} = \frac{1}{N}\sum_i (M_i^2 + m_i^2),\quad
-M_i=\max(a_i,b_i),\; m_i=\min(a_i,b_i).
+\mathcal{L}_{\mathrm{size}}
+= \frac{1}{N}\sum_i \left(\frac{M_i^2 + m_i^2}{\mathrm{ref}}\right)^{\gamma},\quad
+M_i=\max(a_i,b_i),\; m_i=\min(a_i,b_i),
 \]
+
+（`size_ref` \(=\mathrm{ref}\)、`size_power` \(=\gamma\)；主表は ref=1.34, γ=1.5）。
+`size_mode: quadratic`（\(\frac{1}{N}\sum_i (M_i^2+m_i^2)\)）は非主表の共有プロファイル用。
 
 主表 power 30ep config（`elongate_n100_no_cls_full120_teacher_local_pca`）では
 `homology_dimensions: [1]`（H1-only Wasserstein）と `aniso_mode: elongate` を用いる。
 ellphi 退化（NaN 共分散・接線距離未定義など）は
 `run_status: failed` とする（[Computational Reproducibility skill](https://github.com/t-uda/skills/blob/main/skills/computational-reproducibility/SKILL.md)）。
 
-別 ablation では `aniso_mode: linear` により
-$\mathcal{L}_{\mathrm{aniso}} = \frac{1}{N}\sum_i R_i$（$R_i=M_i/m_i$）。
-図用 ablation（`ablation_localscale_try2` 等）では
-`aniso_mode: barrier` として
-$\mathcal{L}_{\mathrm{aniso}} = \frac{10}{N}\sum_i \mathrm{ReLU}(R_i-\tau)^2$。
+非主表 ablation では `aniso_mode: linear`
+（$\mathcal{L}_{\mathrm{aniso}} = \frac{1}{N}\sum_i R_i$、$R_i=M_i/m_i$）や
+`aniso_mode: barrier`
+（$\mathcal{L}_{\mathrm{aniso}} = \frac{10}{N}\sum_i \mathrm{ReLU}(R_i-\tau)^2$）を使う。
+これらの ablation config は公開ツリーに含めず、ローカル `configs/archive/` のみ。
 
 **Mahalanobis 距離**（`tda_ml/topology.py`）は outlier 確率 $p_i$ により二乗距離を
 $1/\bigl((1-p_i)(1-p_j)\bigr)$ で重み付け（`INLIER_PROB_MIN` で下限クリップ）。
@@ -201,29 +246,24 @@ $1/\bigl((1-p_i)(1-p_j)\bigr)$ で重み付け（`INLIER_PROB_MIN` で下限ク�
 
 ## 図・定性出力
 
-`docs/paper/` 以下の LaTeX の **すべての図を一括で出す単一スクリプトはありません**。原稿専用のアセットもあります。下の表は **コードに近い** 図の流れを示すものです。論文の図を増やしたら表も追記してください。
+学習中の楕円・点スナップショットは `tda_ml.trainer` → `tda_ml.visualization.visualize` が
+`<run_dir>/images/` に書き出します。論文用の静的図アセットはローカルの `docs/`（git 外）で管理します。
 
-| 種類 | スクリプト / 場所 | 典型出力 |
-|------|-------------------|----------|
-| 学習中のスナップショット（楕円・点） | `tda_ml.trainer` → `tda_ml.visualization.visualize` | `<run_dir>/images/`、`result_epoch_*.png` を含むファイル名 |
-| PD アニメ（任意 extra） | `tda_ml/reproduce_pd_animation.py`（`pyproject` の optional `repro-pd-animation` 参照） | `experiments/repro_pd_animation_final/frames/` 付近（スクリプトが `image_dir` を設定） |
-| ノイズ感度プロット | `tda_ml/experiments/run_noise_sensitivity.py` | `outputs/metrics_vs_noise_level.png` |
-| クラスタリングベンチマーク図 | `tda_ml/experiments/clustering_benchmark.py`（`--checkpoint` 必須） | `--output` で指定（既定 `outputs/clustering_benchmark.png`） |
-| ロバストネススイープの図 | `tda_ml/robustness_sweep.py` | `important_results/robustness_*.png` |
-| 学習 PNG の分割・後処理 | `tda_ml/split_results_images.py` | ユーザー指定の `--image_dir` / `--output_dir` |
-| 静的な論文用アセット | `docs/paper/` 以下の LaTeX（`\includegraphics` のパスは各 `.tex` を参照） | 論文ビルドが参照する PNG/PDF（ローカル生成のこともあり、常に git に無いとは限らない） |
-
-楕円描画は `tda_ml/visualization.py` と `tda_ml/geometry.py`（パラメータ → 共分散 → 描画）を参照してください。内部用の長い数式メモは公開 git には含めません。
+楕円パラメータ → 共分散 → 描画は `tda_ml/visualization.py` と `tda_ml/geometry.py` を参照してください。
 
 ## 自動テスト
 
 ローカルでは:
 
 ```bash
+uv run python -m unittest discover -s tests -v
+# または
 uv run pytest
 ```
 
-PR および **`main` と `feature/**` への push** のたびに、CI では **ruff**、**pytest**、軽量な **再現スモーク**（`experiments/run_backend_multiseed.py` を `--epochs 1`・1 seed・`mahalanobis` で実行）が走ります。**50 epoch × 5 seed × 2 backend の本番コマンドは CI では実行しません。**
+PR および **`main` と `feature/**` への push** のたびに、CI では **ruff**、テスト、軽量な
+**backend smoke**（`run_backend_multiseed.py` を `--epochs 1`・1 seed・`mahalanobis`）が走ります。
+**論文本番（30ep × 5 seed）は CI では実行しません。**
 
 ## 論文提出時のスナップショット
 

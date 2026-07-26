@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 """
-Paper-aligned baseline evaluation (Phase 3).
+Paper-aligned baseline evaluation.
 
-Same data split as ``evaluate_paper_protocol.py`` (``configs/reproduce.yaml``,
-seeds 42, 123, 456, 789, 1024): tune hyperparameters on validation clouds,
-report MCC / G-Mean / W-Dist on test via ``compute_recall_specificity_gmean_mcc_wdist``.
+Same data split as ``evaluate_paper_protocol.py`` under the paper elongate
+config (typically ``elongate_n100_no_cls_full120_teacher_local_pca``), seeds
+42 / 123 / 456 / 789 / 1024: tune hyperparameters on validation clouds, report
+MCC / G-Mean on test. Topo W-Dist is computed for diagnostics only and is
+**not** a main-table column.
 
 Methods:
   1. Euclidean DBSCAN (sklearn on raw coordinates)
   2. Isolation Forest
   3. Local Outlier Factor (LOF)
-  4. ADBSCAN (local PCA ellipses + Mahalanobis ``apply_anisotropic_dbscan``)
+  4. ADBSCAN (local PCA ellipses + Mahalanobis ``apply_anisotropic_dbscan``;
+     no learned corrections — not compute-matched to the proposed 30ep model)
 
 Usage::
 
@@ -39,16 +42,16 @@ from tqdm import tqdm
 from experiments.evaluate_paper_protocol import (
     CloudMetrics,
     _aggregate_cloud_metrics,
-    _valid_clean_inliers,
     build_split_loader,
     dbscan_labels_to_outlier_pred,
 )
 from tda_ml.config import deep_update, load_config
+from tda_ml.dbscan_eval import valid_clean_inliers
+from tda_ml.local_pca import local_pca_ellipse_params as _local_pca_ellipse_params_torch
 from tda_ml.metrics import (
     compute_recall_specificity_gmean_mcc,
     compute_recall_specificity_gmean_mcc_wdist,
 )
-from tda_ml.numerical_eps import EIGENVALUE_FLOOR, PCA_RIDGE_EPS
 from tda_ml.preflight import preflight_baseline_eval
 from tda_ml.reproducibility import (
     RUN_STATUS_COMPLETED,
@@ -92,43 +95,13 @@ class SeedResult:
 
 
 def local_pca_ellipse_params(points: np.ndarray, k: int = LOCAL_PCA_K) -> np.ndarray:
-    """
-    Baseline ellipse parameters from local PCA only (no learned deltas).
-
-    Matches ``DecoupledGeometricEncoder`` + zero MLP corrections:
-    ``[a, b, theta]`` per point, shape ``(N, 3)``.
-    """
+    """ADBSCAN ellipses via shared ``tda_ml.local_pca`` (normalize_axes=True)."""
     if points.ndim != 2 or points.shape[1] != 2:
         raise ValueError(f"points must be (N, 2); got {points.shape}")
-    n = points.shape[0]
-    if n < k:
-        raise ValueError(f"Need at least k={k} points; got n={n}")
-
-    x = torch.from_numpy(points.astype(np.float32)).unsqueeze(0)  # 1, N, 2
-    dist_sq = torch.cdist(x, x, p=2) ** 2
-    _, idx = torch.topk(-dist_sq, k=k, dim=-1)
-
-    batch_idx = torch.arange(1).view(1, 1, 1).expand(1, n, k)
-    flat_x = x.view(n, 2)
-    flat_neighbors = flat_x[idx.view(1, -1) + (batch_idx.view(1, -1) * n), :]
-    neighbors = flat_neighbors.view(1, n, k, 2)
-
-    relative_coords = neighbors - x.unsqueeze(2)
-    mean_neighbor = relative_coords.mean(dim=2, keepdim=True)
-    centered = relative_coords - mean_neighbor
-    cov = torch.matmul(centered.transpose(-1, -2), centered) / (k - 1)
-
-    eye2 = torch.eye(2, dtype=torch.float32)
-    e, v = torch.linalg.eigh(cov.float() + eye2 * PCA_RIDGE_EPS)
-    v1 = v[:, :, :, 1]
-    base_angle = torch.atan2(v1[:, :, 1], v1[:, :, 0])
-
-    base_axes = torch.sqrt(torch.clamp(e, min=EIGENVALUE_FLOOR))
-    base_axes = torch.flip(base_axes, dims=[-1])
-    base_axes = base_axes / (base_axes.max(dim=-1, keepdim=True)[0] + EIGENVALUE_FLOOR)
-
-    params = torch.cat([base_axes, base_angle.unsqueeze(-1)], dim=-1)
-    return params.squeeze(0).numpy()
+    if points.shape[0] < k:
+        raise ValueError(f"Need at least k={k} points; got n={points.shape[0]}")
+    x = torch.from_numpy(points.astype(np.float32))
+    return _local_pca_ellipse_params_torch(x, k=k, normalize_axes=True).numpy()
 
 
 def load_clouds(config: dict[str, Any], split: str, device: torch.device) -> list[CloudSample]:
@@ -158,7 +131,7 @@ def cloud_metrics_from_pred(
     points: np.ndarray,
     clean_pc: np.ndarray,
 ) -> CloudMetrics:
-    gt_inliers = _valid_clean_inliers(clean_pc)
+    gt_inliers = valid_clean_inliers(clean_pc)
     recall, specificity, gmean, mcc, wdist = compute_recall_specificity_gmean_mcc_wdist(
         labels_gt,
         pred,
@@ -473,7 +446,9 @@ def aggregate_method_results(seed_results: Sequence[SeedResult]) -> dict[str, An
         "wdist_std": sample_std(wdist),
         "notes": (
             f"5 seeds; val hparam selection by max mean cloud MCC; "
-            f"test n_clouds={seed_results[0].n_test_clouds} per seed"
+            f"test n_clouds={seed_results[0].n_test_clouds} per seed; "
+            "wdist_* columns are diagnostics only (not main-table); "
+            "ADBSCAN uses fixed local-PCA ellipses (no 30ep training)"
         ),
     }
 

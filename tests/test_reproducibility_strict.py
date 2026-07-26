@@ -95,11 +95,25 @@ class TestReproducibilityConfig(unittest.TestCase):
                 objective_kind="mcc",
             )
 
-    def test_selection_default_is_val_topo(self):
+    def test_selection_requires_explicit_metric_and_backend(self):
         from tda_ml.model_selection import selection_settings_from_config
 
-        settings = selection_settings_from_config({})
+        with self.assertRaisesRegex(ValueError, "training must be an explicit mapping"):
+            selection_settings_from_config({})
+        with self.assertRaisesRegex(ValueError, "training.selection"):
+            selection_settings_from_config({"training": {}})
+        with self.assertRaisesRegex(ValueError, "distance_backend"):
+            selection_settings_from_config(
+                {"training": {"selection": {"metric": "val_topo"}}}
+            )
+        settings = selection_settings_from_config(
+            {
+                "training": {"selection": {"metric": "val_topo"}},
+                "model": {"topology_loss": {"distance_backend": "ellphi"}},
+            }
+        )
         self.assertEqual(settings.metric, "val_topo")
+        self.assertEqual(settings.backend, "ellphi")
 
 
 class TestPreflightTuneJson(unittest.TestCase):

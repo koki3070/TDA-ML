@@ -26,7 +26,7 @@ mkdir -p "$(dirname "${ROOT}/${LOG}")"
 
 if screen -ls | grep -q "[[:space:]]\+[0-9]*\.${SESSION}[[:space:]]"; then
   echo "screen session already exists: ${SESSION}" >&2
-  screen -ls | grep "${SESSION}" || true
+  screen -ls | grep "${SESSION}" >&2 || echo "(session listed but grep detail failed)" >&2
   exit 1
 fi
 

@@ -11,6 +11,7 @@ from tda_ml.local_pca import (
     local_pca_ellipse_params,
     normalize_teacher_mode,
 )
+from tda_ml.numerical_eps import ZERO_PAD_ABS_SUM
 
 
 def _median_offdiag(d_mat: torch.Tensor) -> float:
@@ -55,7 +56,7 @@ def compute_clean_teacher_batch(
     with torch.no_grad():
         for j in range(clean_points.shape[0]):
             pts = clean_points[j]
-            valid_mask = torch.abs(pts).sum(dim=1) > 1e-6
+            valid_mask = torch.abs(pts).sum(dim=1) > ZERO_PAD_ABS_SUM
             pts = pts[valid_mask]
             if pts.shape[0] < 2:
                 raise RuntimeError(
