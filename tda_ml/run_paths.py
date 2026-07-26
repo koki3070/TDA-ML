@@ -26,9 +26,11 @@ def shorten_config_id(config_id: str, *, max_len: int = 24) -> str:
     if m:
         return f"paper_s{m.group(1)}"
 
+    # Pre-rename production id. Kept distinct from paper_s* so re-running an old
+    # config_id cannot land in the current paper run namespace.
     m = re.fullmatch(r"teacher_local_pca_power_seed(\d+)", config_id)
     if m:
-        return f"paper_s{m.group(1)}"  # legacy alias
+        return f"pwr_s{m.group(1)}"
 
     m = re.fullmatch(r"teacher_local_pca_(ellphi|mahalanobis)_seed(\d+)", config_id)
     if m:
@@ -58,16 +60,17 @@ def shorten_config_id(config_id: str, *, max_len: int = 24) -> str:
     if m:
         return f"smk_{m.group(1)}"
 
+    # Named paper/tune YAMLs: drop the dataset/contract tokens but keep the role,
+    # otherwise paper_* and tune_* collapse to the same run-dir slug.
+    m = re.fullmatch(r"(paper|tune)_n\d+_o\d+_nocls_(.+)", config_id)
+    if m:
+        slug = f"{m.group(1)}_{m.group(2)}"
+        return slug[:max_len] if len(slug) > max_len else slug
+
     slug = config_id
-    for prefix in (
-        "paper_n100_o20_nocls_",
-        "tune_n100_o20_nocls_",
-        "teacher_local_pca_",
-        "elongate_n100_no_cls_",  # legacy slug prefix (old run dirs)
-    ):
+    for prefix in ("elongate_n100_no_cls_", "teacher_local_pca_"):
         if slug.startswith(prefix):
             slug = slug[len(prefix) :]
-            break
     if len(slug) > max_len:
         slug = slug[:max_len]
     return slug

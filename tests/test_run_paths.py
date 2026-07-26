@@ -22,6 +22,21 @@ class TestRunPaths(unittest.TestCase):
         self.assertEqual(shorten_config_id("backend_ellphi_seed42"), "eph_s42")
         self.assertEqual(shorten_config_id("tune_mcc_t010"), "t010")
 
+    def test_shorten_config_id_keeps_paper_tune_role_distinct(self) -> None:
+        paper = shorten_config_id("paper_n100_o20_nocls_h1_ellphi_lpca_power")
+        tune = shorten_config_id("tune_n100_o20_nocls_h1_ellphi_lpca_power")
+        self.assertTrue(paper.startswith("paper_"))
+        self.assertTrue(tune.startswith("tune_"))
+        self.assertNotEqual(paper, tune)
+
+    def test_shorten_config_id_legacy_ids_keep_old_slugs(self) -> None:
+        """Pre-rename ids must not alias into the current paper_s* namespace."""
+        self.assertEqual(shorten_config_id("teacher_local_pca_power_seed42"), "pwr_s42")
+        self.assertNotEqual(
+            shorten_config_id("teacher_local_pca_power_seed42"),
+            shorten_config_id("paper_seed42"),
+        )
+
     def test_resolve_run_slug_prefers_explicit(self) -> None:
         cfg = {
             "meta": {"config_id": "backend_ellphi_seed42", "run_slug": "custom"},
