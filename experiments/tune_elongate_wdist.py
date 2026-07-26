@@ -9,7 +9,7 @@ Each trial:
 2. Loads ``best_model.pth`` (val_topo selection checkpoint; hard-fail if missing).
 3. Objective = mean val **topo W-Dist** (learned ellipses vs local_pca teacher PD).
 
-Base config ``elongate_n100_no_cls_tune_local_pca_ellphi_power`` sets
+Base config ``tune_n100_o20_nocls_h1_ellphi_lpca_power`` sets
 ``teacher_mode: local_pca``, H1-only persistence, and ``size_mode: power``.
 ``w_class: 0``, ``selection.metric: val_topo``.
 
@@ -193,7 +193,7 @@ def make_objective(args: argparse.Namespace):
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     # No implicit default: every study must state its config surface explicitly
-    # (power stack uses elongate_n100_no_cls_tune_local_pca_ellphi_power).
+    # (power stack uses tune_n100_o20_nocls_h1_ellphi_lpca_power).
     p.add_argument("--base-config", type=str, required=True)
     p.add_argument("--n-trials", type=int, default=50)
     p.add_argument(

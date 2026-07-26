@@ -55,9 +55,15 @@ def shorten_config_id(config_id: str, *, max_len: int = 24) -> str:
         return f"smk_{m.group(1)}"
 
     slug = config_id
-    for prefix in ("elongate_n100_no_cls_", "teacher_local_pca_"):
+    for prefix in (
+        "paper_n100_o20_nocls_",
+        "tune_n100_o20_nocls_",
+        "teacher_local_pca_",
+        "elongate_n100_no_cls_",  # legacy slug prefix (old run dirs)
+    ):
         if slug.startswith(prefix):
             slug = slug[len(prefix) :]
+            break
     if len(slug) > max_len:
         slug = slug[:max_len]
     return slug

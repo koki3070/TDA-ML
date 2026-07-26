@@ -202,7 +202,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument(
         "--base-config",
-        default="elongate_n100_no_cls_tune_local_pca_ellphi_power",
+        default="tune_n100_o20_nocls_h1_ellphi_lpca_power",
     )
     p.add_argument("--n-trials", type=int, default=24)
     p.add_argument(

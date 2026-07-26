@@ -21,7 +21,7 @@ from tda_ml.preflight import (  # noqa: E402
     preflight_tune_production_run,
 )
 
-BASE_CONFIG = "elongate_n100_no_cls_full120_teacher_local_pca"
+BASE_CONFIG = "paper_n100_o20_nocls_h1_ellphi_lpca_power"
 TAG_MCC = "power_mcc_valtopo_paper_eval"
 TAG_WDIST = "power_wdist_valtopo_paper_eval"
 

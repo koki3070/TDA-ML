@@ -9,7 +9,7 @@ Usage::
 
     uv run python experiments/evaluate_paper_protocol.py \\
         --run-dir outputs/supervised/.../pwr_s42_<stamp> \\
-        --base-config elongate_n100_no_cls_full120_teacher_local_pca \\
+        --base-config paper_n100_o20_nocls_h1_ellphi_lpca_power \\
         --split val
 
     uv run python experiments/evaluate_paper_protocol.py \\
@@ -456,7 +456,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--base-config",
         type=str,
-        default="elongate_n100_no_cls_full120_teacher_local_pca",
+        default="paper_n100_o20_nocls_h1_ellphi_lpca_power",
         help="YAML used when run_manifest lacks method overrides (paper no_cls default).",
     )
     p.add_argument("--split", choices=["val", "test"], required=True)

@@ -4,7 +4,7 @@
 
 ## リポジトリに含まれる範囲（目安）
 
-- **含む:** `tda_ml/`、**`configs/` 直下の正本 YAML**（`base.yaml` と `reproduce` / `dev` / `prod` / `test_fast`、および論文比較用の `elongate_n100_no_cls_*`）、`tests/`、追跡されている `scripts/`、論文・再現用 `experiments/`（下記）、および `README.md` / `REPRODUCIBILITY.md` / `pyproject.toml` / `uv.lock` / `LICENSE` / `CITATION.cff` などのメタデータ。
+- **含む:** `tda_ml/`、**`configs/` 直下の正本 YAML**（`base.yaml` と `reproduce` / `dev` / `prod` / `test_fast`、および論文比較用の `paper_n100_o20_nocls_h1_ellphi_lpca_power` / `tune_n100_o20_nocls_h1_ellphi_lpca_power`）、`tests/`、追跡されている `scripts/`、論文・再現用 `experiments/`（下記）、および `README.md` / `REPRODUCIBILITY.md` / `pyproject.toml` / `uv.lock` / `LICENSE` / `CITATION.cff` などのメタデータ。
 - **含めない:** `docs/` 以下（**ローカル実験メモ**；公開方針で git に入れる場合は別途決定）、`configs/archive/`（履歴用 YAML を置く場合は **ローカルのみ**）、`outputs/`、`data/`、`.cursor/` など。`load_config("archive/...")` は、手元に `configs/archive/*.yaml` を置いた場合にのみ使えます。
 
 ### 論文比較（ellphi + power 二目的）で使う `experiments/`
@@ -12,7 +12,7 @@
 **論文主表の提案:** W-Dist tune 重みの 30ep 5-seed（`run_teacher_local_pca_power_30ep_multiseed.sh wdist`）。
 **主張:** Euclidean DBSCAN / ADBSCAN と **同程度の外れ値除去性能**（MCC / G-Mean；5 seed の mean ± sample std による**記述的**比較。同等性検定は行わない）。主表に Topo W. 列は載せない。
 **比較の非対称:** ADBSCAN は学習なしの局所 PCA 楕円ベースライン。提案法は同一データで 30ep 学習する（計算資源・パラメータ更新は対等ではない）。
-**正本 config:** `elongate_n100_no_cls_full120_teacher_local_pca`（`w_class=0`, `homology_dimensions=[1]`, `aniso_mode=elongate`）。
+**正本 config:** `paper_n100_o20_nocls_h1_ellphi_lpca_power`（`w_class=0`, `homology_dimensions=[1]`, `aniso_mode=elongate`）。
 出力先は `WDIST_OUT` / `MCC_OUT` / `LOG_ROOT`（既定: `outputs/supervised/pwr30_*`）で明示する（生成物は git に含めない）。
 
 | 区分 | パス |
@@ -44,7 +44,7 @@ bash experiments/run_teacher_local_pca_power_30ep_multiseed.sh wdist
 
 ```bash
 uv run python experiments/evaluate_paper_baselines.py \
-  --base-config elongate_n100_no_cls_full120_teacher_local_pca \
+  --base-config paper_n100_o20_nocls_h1_ellphi_lpca_power \
   --out-dir outputs/paper_baselines
 ```
 
@@ -57,7 +57,7 @@ uv run python experiments/run_teacher_local_pca_power_30ep.py \
 
 uv run python experiments/evaluate_paper_protocol.py \
   --run-dir outputs/supervised/.../pwr_s42_<stamp> \
-  --base-config elongate_n100_no_cls_full120_teacher_local_pca \
+  --base-config paper_n100_o20_nocls_h1_ellphi_lpca_power \
   --split val
 ```
 
@@ -73,7 +73,7 @@ uv run python experiments/evaluate_paper_protocol.py \
 
 主表・チューニングの preflight は `homology_dimensions=[1]`、`teacher_mode=local_pca`、`prob_weighting=false`、`aniso_mode=elongate`、`distance_backend=ellphi`、`size_mode=power`、`w_class=0.0`、`teacher_local_pca_k=10`、`teacher_local_pca_normalize_axes=true` の明示を要求する。欠落や不一致は実行前に hard-fail する。本番 30ep は `--tune-json`（H1-only Optuna best）必須で、YAML 埋め込みの旧重みでは起動しない。
 
-**退化ガード variant（主表外・Methods opt-in）:** near-tangent データでは素の `elongate` が短軸→0 まで潰し、ellphi tangency が hard-fail し得る。対策として `aniso_mode: elongate_barrier`（`PAPER_NO_CLS_BARRIER_CONTRACT`、`aniso_barrier_threshold=6.0`、`distance_backend=ellphi`）を **YAML で明示したときだけ**使う。公開参照 YAML は `elongate_n100_no_cls_tune_local_pca_ellphi_power_h1_neartangent_barrier`（`BASE_CONFIG=...`）。暗黙の切替はしない。主表の ADBSCAN 比較・本番 30ep 経路には使わない（対応する full120 本番 YAML は公開面に置かない）。
+**退化ガード variant（主表外・Methods opt-in）:** near-tangent データでは素の `elongate` が短軸→0 まで潰し、ellphi tangency が hard-fail し得る。対策として `aniso_mode: elongate_barrier`（`PAPER_NO_CLS_BARRIER_CONTRACT`、`aniso_barrier_threshold=6.0`、`distance_backend=ellphi`）を **YAML で明示したときだけ**使う。公開ツリーにはこの variant 用 YAML を置かない（コード契約とテストで担保；ローカル `configs/archive/` に置く場合のみ）。暗黙の切替はしない。主表の ADBSCAN 比較・本番 30ep 経路には使わない。
 
 ## 環境
 
@@ -99,7 +99,7 @@ uv run python experiments/evaluate_paper_protocol.py \
 - MNIST は git にコミットしません（`data/` は無視対象）。
 - 学習・paper eval ともデータ根は **リポジトリ根の `data/`**（`tda_ml.config.default_data_root()`）であり、プロセスの cwd には依存しません。初回アクセス時に `torchvision` 経由でそこにダウンロードされます。
 - 初回はインターネットに到達できるようにするか、キャッシュ済みの MNIST を自分でリポジトリ根の `data/` に置いてください。
-- 設定 YAML の役割分担は **`configs/README.md`** を参照（共有プロファイル + 論文用 `elongate_n100_no_cls_*`）。旧設定はローカルで `configs/archive/` に置けるが、公開クローンには同梱されない。
+- 設定 YAML の役割分担は **`configs/README.md`** を参照（共有プロファイル + 論文用 `paper_n100_o20_nocls_h1_ellphi_lpca_power` / `tune_n100_o20_nocls_h1_ellphi_lpca_power`）。旧設定はローカルで `configs/archive/` に置けるが、公開クローンには同梱されない。
 
 ## チェックポイントと実行出力
 
@@ -228,7 +228,7 @@ M_i=\max(a_i,b_i),\; m_i=\min(a_i,b_i),
 （`size_ref` \(=\mathrm{ref}\)、`size_power` \(=\gamma\)；主表は ref=1.34, γ=1.5）。
 `size_mode: quadratic`（\(\frac{1}{N}\sum_i (M_i^2+m_i^2)\)）は非主表の共有プロファイル用。
 
-主表 power 30ep config（`elongate_n100_no_cls_full120_teacher_local_pca`）では
+主表 power 30ep config（`paper_n100_o20_nocls_h1_ellphi_lpca_power`）では
 `homology_dimensions: [1]`（H1-only Wasserstein）と `aniso_mode: elongate` を用いる。
 ellphi 退化（NaN 共分散・接線距離未定義など）は
 `run_status: failed` とする（[Computational Reproducibility skill](https://github.com/t-uda/skills/blob/main/skills/computational-reproducibility/SKILL.md)）。

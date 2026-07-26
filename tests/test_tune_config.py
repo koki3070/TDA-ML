@@ -15,17 +15,20 @@ from tune_elongate_wdist import build_trial_config as build_wdist_trial  # noqa:
 
 
 class TestTuneTrialConfig(unittest.TestCase):
-    def test_baseline_declares_topology_contract(self):
+    def test_paper_declares_topology_contract(self):
         from tda_ml.config import load_config
 
-        cfg = load_config("elongate_n100_no_cls_full120_baseline")
+        cfg = load_config("paper_n100_o20_nocls_h1_ellphi_lpca_power")
         self.assertEqual(cfg["model"]["topology_loss"]["homology_dimensions"], [1])
         self.assertFalse(cfg["model"]["topology_loss"]["prob_weighting"])
-        self.assertEqual(cfg["loss"]["teacher_mode"], "euclidean")
+        self.assertEqual(cfg["loss"]["teacher_mode"], "local_pca")
+        self.assertEqual(cfg["model"]["topology_loss"]["distance_backend"], "ellphi")
+        self.assertEqual(cfg["data"]["max_points"], 100)
+        self.assertEqual(cfg["data"]["num_outliers"], 20)
 
     def test_canonical_power_tune_base(self):
         cfg = build_wdist_trial(
-            "elongate_n100_no_cls_tune_local_pca_ellphi_power",
+            "tune_n100_o20_nocls_h1_ellphi_lpca_power",
             w_aniso=0.1,
             w_size=0.2,
             w_topo=0.3,
@@ -46,7 +49,7 @@ class TestTuneTrialConfig(unittest.TestCase):
 
     def test_power_tune_preserves_h1_hard_fail_stack(self):
         cfg = build_wdist_trial(
-            "elongate_n100_no_cls_tune_local_pca_ellphi_power",
+            "tune_n100_o20_nocls_h1_ellphi_lpca_power",
             w_aniso=0.1,
             w_size=0.2,
             w_topo=0.3,
@@ -68,7 +71,7 @@ class TestTuneTrialConfig(unittest.TestCase):
         from tda_ml.config import load_config
 
         divergent = load_config(
-            "elongate_n100_no_cls_tune_local_pca_ellphi_power",
+            "tune_n100_o20_nocls_h1_ellphi_lpca_power",
             project_root=REPO,
         )
         divergent["model"]["topology_loss"]["homology_dimensions"] = [0, 1]
@@ -115,25 +118,41 @@ class TestTuneTrialConfig(unittest.TestCase):
         self.assertEqual(cfg["loss"]["aniso_mode"], "elongate")
 
     def test_wdist_builder_mirrors_barrier_variant_from_base_config(self):
-        cfg = build_wdist_trial(
-            "elongate_n100_no_cls_tune_local_pca_ellphi_power_h1_neartangent_barrier",
-            w_aniso=0.1,
-            w_size=0.2,
-            w_topo=0.3,
-            lr=1e-4,
-            backend="ellphi",
-            tune_epochs=5,
-            out_base="outputs/x",
-            trial_number=3,
-            size_mode="power",
+        from copy import deepcopy
+
+        from tda_ml.config import load_config
+
+        # No public Methods YAML for barrier; declare the variant inline.
+        barrier = load_config(
+            "tune_n100_o20_nocls_h1_ellphi_lpca_power",
+            project_root=REPO,
         )
+        barrier["loss"]["aniso_mode"] = "elongate_barrier"
+        barrier["loss"]["aniso_barrier_threshold"] = 6.0
+
+        with mock.patch(
+            "tune_elongate_wdist.load_config",
+            side_effect=lambda *a, **k: deepcopy(barrier),
+        ):
+            cfg = build_wdist_trial(
+                "ignored",
+                w_aniso=0.1,
+                w_size=0.2,
+                w_topo=0.3,
+                lr=1e-4,
+                backend="ellphi",
+                tune_epochs=5,
+                out_base="outputs/x",
+                trial_number=3,
+                size_mode="power",
+            )
         self.assertEqual(cfg["loss"]["aniso_mode"], "elongate_barrier")
         self.assertEqual(cfg["loss"]["aniso_barrier_threshold"], 6.0)
         self.assertEqual(cfg["model"]["topology_loss"]["homology_dimensions"], [1])
 
     def test_mcc_builder_forces_homology_h1(self):
         cfg = build_mcc_trial(
-            "elongate_n100_no_cls_tune_local_pca_ellphi_power",
+            "tune_n100_o20_nocls_h1_ellphi_lpca_power",
             w_aniso=0.1,
             w_size=0.2,
             w_topo=0.3,
