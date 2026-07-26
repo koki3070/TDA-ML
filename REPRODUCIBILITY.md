@@ -56,7 +56,7 @@ uv run python experiments/run_paper_30ep.py \
   --seed 42
 
 uv run python experiments/eval_paper.py \
-  --run-dir outputs/supervised/.../pwr_s42_<stamp> \
+  --run-dir outputs/supervised/.../paper_s42_<stamp> \
   --base-config paper_n100_o20_nocls_h1_ellphi_lpca_power \
   --split val
 ```
