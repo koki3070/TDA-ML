@@ -1,9 +1,74 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "tda-ml"
 version = "0.1.0"
-description = "Add your description here"
+description = "Reproducibility-focused implementation for anisotropic topological denoising."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "ellphi==0.1.2",
+    "numpy<2",
+    "torch>=2.0",
+    "torchvision>=0.15",
+    "gudhi>=3.4",
+    "scikit-learn>=1.3",
+    "scikit-image>=0.22",
+    "matplotlib>=3.8",
+    "tqdm>=4.65",
+    "pyyaml>=6",
+    "scipy>=1.10",
+    "torch_topological",
+]
+
+[project.optional-dependencies]
+experiments = [
+    "optuna>=3.0",
+    "seaborn>=0.13",
+    "joblib>=1.3",
+    "pandas>=2.0",
+]
+images = [
+    "pillow>=10.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["tda_ml"]
+
+[tool.uv.sources]
+torch_topological = { path = "pytorch-topological", editable = true }
+# Local fork of t-uda/ellphi (v0.1.2) adding a C++ pdist_tangency_grad kernel
+# (~175x faster differentiable tangency backward). See ellphi_repo/.
+ellphi = { path = "ellphi_repo", editable = true }
+
+[dependency-groups]
+dev = [
+    "ruff>=0.4",
+    "pytest>=8",
+    # Required for tests because torch_topological depends on torch_geometric.
+    "torch-geometric>=2.5",
+]
+
+[tool.ruff]
+# Ignore generated artifacts, private/internal directories, and vendored externals.
+exclude = [
+    ".git",
+    ".venv",
+    "__pycache__",
+    "ellphi_repo",
+    "pytorch-topological",
+    "outputs",
+    "data",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+norecursedirs = [
+    "ellphi_repo",
+    "pytorch-topological",
+    "outputs",
+    "data",
 ]

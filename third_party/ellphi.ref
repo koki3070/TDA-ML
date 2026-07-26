@@ -1,0 +1,5 @@
+# Pinned commit for the ellphi path dependency (ellphi_repo/).
+# Fork with C++ pdist_tangency_grad (grad API for differentiable training).
+# Upstream base: https://github.com/t-uda/ellphi
+# Fork: https://github.com/koki3070/ellphi
+9fcad0cea3d83d57d3cdeb1f4cfc3464588b792f

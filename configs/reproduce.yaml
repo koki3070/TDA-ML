@@ -1,0 +1,48 @@
+# Official multi-seed reproduction profile (see experiments/run_backend_multiseed.py).
+# Hyperparameters from Optuna trial 2; weights are read from ``loss`` (see configs/README.md).
+
+meta:
+  config_id: "reproduce"
+
+model:
+  point_dim: 2
+  feature_dim: 128
+  ellipse_param_dim: 5
+  threshold: 0.5
+  topology_loss:
+    metric_type: "anisotropic"
+    distance_backend: "mahalanobis"  # overridden per run by run_backend_multiseed
+    ellphi_differentiable: true
+    homology_dimensions: [0, 1]
+    prob_weighting: true  # ellphi runs set false in the multiseed driver
+
+loss:
+  w_class: 1.0
+  w_topo: 0.1
+  w_aniso: 0.01099204345474479
+  w_size: 0.0055785823086202556
+  pos_weight: 1.0
+  aniso_mode: "linear"
+  size_mode: quadratic
+  size_ref: 1.34
+  size_power: 1.5
+  teacher_mode: euclidean
+
+training:
+  lr: 0.0004897466143769238
+  epochs: 50
+  grad_clip_value: 1.0
+  visualize_every: 1
+  warmup_epochs: 0
+
+data:
+  max_points: 200
+  num_outliers: 20
+  seed: 42
+  test_size: 1000
+  num_workers: 4
+  batch_size: 64
+
+outputs:
+  base_dir: "outputs"
+  # log_dir / image_dir are replaced per run by tda_ml.main (under <base_dir>/<config_id>_<timestamp>/)

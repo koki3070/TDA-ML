@@ -1,0 +1,48 @@
+# Longer CPU-oriented profile (non-official). Only keys read by tda_ml.main / Trainer are listed.
+# For paper reproduction use ``reproduce`` via run_backend_multiseed.py.
+
+meta:
+  config_id: "prod"
+
+training:
+  epochs: 50
+  visualize_every: 10
+  lr: 0.001
+  lambda_class: 1.0
+  lambda_topo: 0.1
+  lambda_aniso: 0.0
+  lambda_major: 0.01
+  lambda_minor: 2.0
+  aniso_mode: "barrier"
+  barrier_threshold: 5.0
+  rotation_augmentation: false
+  grad_clip_value: 1.0
+  warmup_epochs: 5
+
+loss:
+  pos_weight: 0.2
+  aniso_mode: "barrier"
+  teacher_mode: euclidean
+
+model:
+  threshold: 0.5
+  topology_loss:
+    distance_backend: "mahalanobis"
+    homology_dimensions: [0, 1]
+    prob_weighting: true
+
+data:
+  batch_size: 4
+  train_size: 4500
+  val_size: 500
+  test_size: 1000
+  seed: 42
+  num_workers: 0
+  max_points: 50
+  num_outliers: 50
+
+device: "cpu"
+
+outputs:
+  base_dir: "outputs/prod"
+  save_every: 1

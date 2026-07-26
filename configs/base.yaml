@@ -1,0 +1,103 @@
+# Base configuration
+# Shared parameters for all environments
+
+loss:
+  w_class: 1.0
+  w_topo: 0.1
+  w_aniso: 0.01
+  w_size: 1.0
+  # Explicit teacher for shared profiles; paper no_cls YAML overrides to local_pca.
+  teacher_mode: euclidean
+  aniso_mode: linear
+  size_mode: quadratic
+  size_ref: 1.34
+  size_power: 1.5
+  # Filtration-unit alignment (declared; paper configs may override).
+  topo_eps_scale: 1.0
+  topo_scale_mode: fixed
+
+training:
+  lr: 0.0003
+  grad_clip_value: 1.0
+  visualize_every: 10 # Epoch interval for visualization
+  selection:
+    metric: val_topo
+  # Classification loss weight
+  lambda_class: 1.0
+  # Anisotropic regularization weight
+  lambda_aniso: 0.01
+  # Ellipse size regularization weight
+  lambda_size: 1.0
+  # Topological loss weight
+  lambda_topo: 0.1
+  # Penalty scale for outliers in topological distance
+  outlier_penalty_scale: 2.0
+
+model:
+  topology_loss:
+    metric_type: "anisotropic" # "anisotropic" or "euclidean"
+    distance_backend: "mahalanobis" # or "ellphi"; multiseed driver overrides per run
+    ellphi_differentiable: true
+    # Shared profiles use H0+H1; paper no_cls YAML sets [1] (H1-only).
+    homology_dimensions: [0, 1]
+    # mahalanobis may weight by outlier probs; ellphi requires false.
+    prob_weighting: true
+  threshold: 0.1
+  ellipse_param_dim: 5
+  point_dim: 2
+  feature_dim: 128
+
+data:
+  max_points: 100
+  batch_size: 32
+  num_outliers: 20
+  # Explicit outlier/noise geometry; run_setup hard-fails if these are absent.
+  outlier_mode: uniform      # uniform | local_pca_tangent
+  noise_std: 0.01
+  num_workers: 2
+  pin_memory: true
+  seed: 42
+  train_size: 4500
+  val_size: 500
+  test_size: 1000
+  dataset_type: "mnist"
+
+device: "auto" # "auto", "cpu", "cuda", or "mps"
+
+outputs:
+  log_dir: "outputs/logs"
+  image_dir: "outputs/images"
+
+# Paper / tuning DBSCAN grid (explicit; no Python implicit defaults).
+evaluation:
+  dbscan:
+    backend: mahalanobis
+    metric: max
+    eps_values:
+      - 0.15
+      - 0.246429
+      - 0.342857
+      - 0.439286
+      - 0.535714
+      - 0.632143
+      - 0.728571
+      - 0.825
+      - 0.921429
+      - 1.017857
+      - 1.114286
+      - 1.210714
+      - 1.307143
+      - 1.403571
+      - 1.5
+    min_samples_values: [3, 5, 7, 10, 15]
+  baselines:
+    contamination_values: [0.05, 0.07, 0.09, 0.11, 0.13, 0.15, 0.20]
+    lof_n_neighbors: [5, 10, 15, 20, 30]
+
+reproducibility:
+  strict_topo_samples: true
+  allow_nan_batch_skip: false
+  allow_empty_cloud_fallback: false
+  allow_skip_degenerate_grid_cells: false
+  allow_otsu_threshold_fallback: false
+  allow_legacy_loss_keys: false

@@ -1,0 +1,75 @@
+# F-1 / BLG-004: static analysis, tests, and a lightweight repro smoke on every PR and on pushes
+# to protected branches. (Workflow filename kept as ruff.yml for existing branch-protection hooks.)
+# Add this workflow as a required status check in branch protection to block merges on failure.
+name: Ruff
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "feature/**"
+
+permissions:
+  contents: read
+
+jobs:
+  ruff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout (recursive submodules for pytorch-topological path dependency)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # pyproject path dependency; pin matches third_party/pytorch_topological.ref.
+      - name: Ensure pytorch-topological (uv path dependency)
+        run: ./scripts/ensure_pytorch_topological.sh
+
+      # pyproject path dependency; pin matches third_party/ellphi.ref.
+      - name: Ensure ellphi_repo (uv path dependency)
+        run: ./scripts/ensure_ellphi_repo.sh
+
+      - name: Install uv and Python 3.12
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install dependencies (all groups, incl. dev / ruff)
+        run: uv sync --all-groups --extra experiments --frozen
+
+      - name: Ellphi pin and grad API smoke
+        run: |
+          uv run python - <<'PY'
+          from pathlib import Path
+          from tda_ml.reproducibility import (
+              assert_ellphi_differentiable_available,
+              assert_ellphi_repo_matches_pin,
+              read_pinned_ellphi_revision,
+          )
+          pin = read_pinned_ellphi_revision(Path.cwd())
+          assert pin, "missing third_party/ellphi.ref"
+          assert_ellphi_repo_matches_pin(project_root=Path.cwd())
+          impl = assert_ellphi_differentiable_available(ellphi_differentiable=True)
+          print(f"ellphi ok pin={pin[:12]} impl={impl}")
+          PY
+
+      - name: Ruff check (repo root; F-1 canonical command)
+        run: uv run ruff check .
+
+      - name: Pytest
+        run: uv run pytest -q
+
+      # One epoch, one seed, mahalanobis only (README / REPRODUCIBILITY.md). Fresh out-base per run.
+      - name: Repro smoke (run_backend_multiseed)
+        run: |
+          set -euo pipefail
+          OUT="outputs/ci_smoke_${GITHUB_RUN_ID:-local}"
+          uv run python experiments/run_backend_multiseed.py \
+            --base-config reproduce \
+            --epochs 1 \
+            --seeds 42 \
+            --backends mahalanobis \
+            --out-base "$OUT"

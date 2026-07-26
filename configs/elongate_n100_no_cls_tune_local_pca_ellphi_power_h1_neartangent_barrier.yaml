@@ -1,0 +1,88 @@
+# H1-only tune on NEAR-tangent outliers with the elongate_barrier degeneracy guard.
+# Same stack as elongate_n100_no_cls_tune_local_pca_ellphi_power, plus
+# near-tangent outlier data and loss.aniso_mode: elongate_barrier
+# (+ explicit aniso_barrier_threshold).
+#
+# Why: on near-tangent data, plain `elongate` rewards minor/major -> 0 with no
+# counterweight; by epoch 10-20 minor semi-axes collapsed to ~1e-5 (aspect
+# ~350) and ellphi tangency hard-failed on the needle geometry (15/16 stage-2
+# conditions died). The barrier keeps the elongate reward below the aspect
+# ceiling and pushes back quadratically above it, bounding minor >= major/T.
+# T=6.0 matches the declared PAPER_NO_CLS_BARRIER_CONTRACT constant.
+
+meta:
+  config_id: "elongate_n100_no_cls_tune_local_pca_ellphi_power_h1_neartangent_barrier"
+
+model:
+  point_dim: 2
+  feature_dim: 128
+  ellipse_param_dim: 5
+  threshold: 0.5
+  topology_loss:
+    metric_type: "anisotropic"
+    distance_backend: "ellphi"
+    ellphi_differentiable: true
+    prob_weighting: false
+    homology_dimensions: [1]
+
+loss:
+  w_class: 0.0
+  w_topo: 0.0883
+  w_aniso: 0.0541
+  w_size: 0.488
+  pos_weight: 1.0
+  aniso_mode: elongate_barrier
+  aniso_barrier_threshold: 6.0
+  size_mode: power
+  size_ref: 1.34
+  size_power: 1.5
+  teacher_mode: local_pca
+  teacher_local_pca_k: 10
+  teacher_local_pca_normalize_axes: true
+  topo_eps_scale: 1.0
+  topo_scale_mode: fixed
+
+training:
+  lr: 0.000158
+  epochs: 20
+  grad_clip_value: 1.0
+  visualize_every: 10000
+  warmup_epochs: 0
+  selection:
+    metric: val_topo
+    eval_every: 1
+    dbscan:
+      eps_values: null
+      min_samples_values: null
+
+data:
+  max_points: 100
+  num_outliers: 20
+  # GT-proximal anisotropic outliers: displace inliers within a ±30° cone
+  # around local-PCA PC1, rejected until >=0.08 from every clean inlier.
+  # noise_std matches the uniform baseline: inliers get the same isotropic
+  # jitter so only the OUTLIER distribution differs.
+  outlier_mode: local_pca_tangent
+  noise_std: 0.01
+  tangent_pca_k: 10
+  tangent_offset_min: 0.15
+  tangent_offset_max: 0.40
+  tangent_angle_jitter_deg: 30.0
+  tangent_stroke_clearance: 0.08
+  tangent_direction: tangent
+  seed: 42
+  train_size: 4500
+  val_size: 500
+  test_size: 1000
+  num_workers: 2
+  batch_size: 64
+  pin_memory: true
+
+performance:
+  cudnn_benchmark: true
+  enable_tf32: true
+  matmul_precision: high
+
+outputs:
+  base_dir: "outputs"
+  save_every: 1

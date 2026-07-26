@@ -1,0 +1,20 @@
+# Fast test configuration
+meta:
+  config_id: "test_fast"
+
+training:
+  epochs: 5
+  visualize_every: 5
+  lambda_size: 1.0
+
+model:
+  threshold: 0.1
+
+data:
+  train_size: 100
+  val_size: 50
+  test_size: 50
+  batch_size: 10
+
+outputs:
+  base_dir: "outputs/verification_fast"

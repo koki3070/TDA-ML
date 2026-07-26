@@ -1,0 +1,41 @@
+# Lightweight local training (non-official; for wiring checks).
+
+meta:
+  config_id: "dev"
+
+loss:
+  w_class: 1.0
+  w_topo: 0.1
+  w_aniso: 0.01
+  w_size: 0.0001
+  teacher_mode: euclidean
+
+training:
+  epochs: 3
+  visualize_every: 1
+  lr: 0.0003
+  grad_clip_value: 1.0
+  lambda_size: 0.0001
+
+model:
+  ellipse_param_dim: 5
+  topology_loss:
+    metric_type: "anisotropic"
+    distance_backend: "mahalanobis"
+    homology_dimensions: [0, 1]
+    prob_weighting: true
+
+data:
+  train_size: 80
+  val_size: 20
+  test_size: 50
+  batch_size: 4
+  max_points: 100
+  num_outliers: 20
+  num_workers: 2
+  pin_memory: true
+
+device: "auto"
+
+outputs:
+  base_dir: "outputs/dev"

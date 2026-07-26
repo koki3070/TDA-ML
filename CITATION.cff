@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "If you use this repository, please cite it using this metadata."
+title: "TDA-ML Reproducibility Repository"
+type: software
+version: 0.1.0
+license: MIT
+repository-code: "https://github.com/uda-lab/TDA-ML"
+url: "https://github.com/uda-lab/TDA-ML"
+authors:
+  - name: "Uda Lab"
