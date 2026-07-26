@@ -33,7 +33,12 @@ from tda_ml.checkpoint_io import (
     load_torch_checkpoint,
     resolve_val_topo_checkpoint,
 )
-from tda_ml.config import deep_update, load_config, model_kwargs_from_config
+from tda_ml.config import (
+    default_data_root,
+    deep_update,
+    load_config,
+    model_kwargs_from_config,
+)
 from tda_ml.data_loader import NoisyMNISTDataset, create_data_loader
 from tda_ml.dbscan_eval import evaluate_model_grid, iter_cloud_predictions
 from tda_ml.metrics import compute_recall_specificity_gmean_mcc_wdist
@@ -61,7 +66,9 @@ class CloudMetrics:
     specificity: float
     gmean: float
     mcc: float
-    wdist: float
+    # None = intentionally not computed (e.g. MCC-only val grid). Never use NaN
+    # as a stand-in: aggregation must hard-fail rather than nanmean.
+    wdist: float | None = None
 
 
 @dataclass
@@ -117,7 +124,10 @@ def evaluate_cloud_dbscan(
     return CloudMetrics(recall, specificity, gmean, mcc, wdist)
 
 
-def _aggregate_cloud_metrics(rows: list[CloudMetrics]) -> tuple[float, float, float, float, float]:
+def _aggregate_classification_metrics(
+    rows: list[CloudMetrics],
+) -> tuple[float, float, float, float]:
+    """Mean recall / specificity / G-Mean / MCC (no W-Dist)."""
     if not rows:
         raise ValueError("No clouds to aggregate")
     return (
@@ -125,8 +135,28 @@ def _aggregate_cloud_metrics(rows: list[CloudMetrics]) -> tuple[float, float, fl
         float(np.mean([r.specificity for r in rows])),
         float(np.mean([r.gmean for r in rows])),
         float(np.mean([r.mcc for r in rows])),
-        float(np.mean([r.wdist for r in rows])),
     )
+
+
+def _aggregate_cloud_metrics(
+    rows: list[CloudMetrics],
+) -> tuple[float, float, float, float, float]:
+    """Mean classification metrics plus W-Dist; hard-fail if any W-Dist missing/non-finite."""
+    recall, specificity, gmean, mcc = _aggregate_classification_metrics(rows)
+    wdists: list[float] = []
+    for r in rows:
+        if r.wdist is None:
+            raise ValueError(
+                "cannot aggregate W-Dist: at least one cloud has wdist=None "
+                "(not computed). Use _aggregate_classification_metrics for MCC-only phases."
+            )
+        if not np.isfinite(r.wdist):
+            raise ValueError(
+                f"cannot aggregate non-finite W-Dist ({r.wdist!r}); "
+                "refusing silent nanmean"
+            )
+        wdists.append(float(r.wdist))
+    return recall, specificity, gmean, mcc, float(np.mean(wdists))
 
 
 def build_split_loader(config: dict[str, Any], split: str, device: torch.device):
@@ -208,8 +238,9 @@ def build_split_loader(config: dict[str, Any], split: str, device: torch.device)
     if "noise_std" not in data_cfg:
         raise ValueError("data.noise_std must be set explicitly; refusing silent default")
 
+    repro = reproducibility_settings(config)
     dataset_kwargs: dict[str, Any] = dict(
-        root=str(REPO_ROOT / "data"),
+        root=str(default_data_root()),
         train=train_flag,
         max_points=data_cfg["max_points"],
         num_outliers=data_cfg["num_outliers"],
@@ -219,6 +250,8 @@ def build_split_loader(config: dict[str, Any], split: str, device: torch.device)
         noise_seed=seed,
         preload=True,
         outlier_mode=outlier_mode,
+        allow_empty_cloud_fallback=repro["allow_empty_cloud_fallback"],
+        allow_otsu_threshold_fallback=repro["allow_otsu_threshold_fallback"],
     )
     if outlier_mode == "local_pca_tangent":
         for key in (

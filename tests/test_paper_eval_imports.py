@@ -23,6 +23,17 @@ class TestPaperEvalImports(unittest.TestCase):
         self.assertTrue(callable(protocol.load_model_from_run))
         self.assertTrue(callable(protocol.build_split_loader))
 
+    def test_train_and_eval_share_data_root(self):
+        """Training and paper eval must not disagree on MNIST cache path (cwd-independent)."""
+        from tda_ml.config import default_data_root
+        from tda_ml.run_setup import default_data_root as train_data_root
+
+        import experiments.evaluate_paper_protocol as protocol
+
+        self.assertIs(protocol.default_data_root, default_data_root)
+        self.assertIs(train_data_root, default_data_root)
+        self.assertEqual(default_data_root().name, "data")
+
     def test_public_paper_configs_pass_contract(self):
         assert_paper_no_cls_contract(
             load_config("elongate_n100_no_cls_full120_teacher_local_pca")

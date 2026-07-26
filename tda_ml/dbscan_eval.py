@@ -157,12 +157,19 @@ def _eval_prepared_cloud(
 
 
 def _aggregate(rows: list[CloudMetrics]) -> tuple[float, float, float, float, float]:
+    if not rows:
+        raise ValueError("No clouds to aggregate")
+    wdists = [float(r.wdist) for r in rows]
+    if any(not np.isfinite(w) for w in wdists):
+        raise ValueError(
+            f"cannot aggregate non-finite W-Dist ({wdists!r}); refusing silent nanmean"
+        )
     return (
         float(np.mean([r.recall for r in rows])),
         float(np.mean([r.specificity for r in rows])),
         float(np.mean([r.gmean for r in rows])),
         float(np.mean([r.mcc for r in rows])),
-        float(np.mean([r.wdist for r in rows])),
+        float(np.mean(wdists)),
     )
 
 

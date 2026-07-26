@@ -41,6 +41,7 @@ from tqdm import tqdm
 
 from experiments.evaluate_paper_protocol import (
     CloudMetrics,
+    _aggregate_classification_metrics,
     _aggregate_cloud_metrics,
     build_split_loader,
     dbscan_labels_to_outlier_pred,
@@ -192,9 +193,8 @@ def evaluate_adbscan(
 
     ``topo_options=None`` is the val grid-search phase: selection uses MCC only,
     and the ellipse-filtration topo W-Dist does not depend on (eps, min_samples),
-    so it is deliberately NOT computed there (wdist=NaN placeholder, never
-    aggregated into results). The test phase passes explicit ``topo_options``
-    and reports the real W-Dist.
+    so it is deliberately NOT computed there (``wdist=None``, never aggregated).
+    The test phase passes explicit ``topo_options`` and reports the real W-Dist.
     """
     from tda_ml.dbscan import apply_anisotropic_dbscan
 
@@ -213,7 +213,9 @@ def evaluate_adbscan(
         cloud.labels_gt, pred
     )
     if topo_options is None:
-        return CloudMetrics(recall, specificity, gmean, mcc, float("nan"))
+        # Val MCC grid: ellipse W-Dist is independent of (eps, min_samples) and
+        # is not a selection objective — leave unset rather than NaN-placeholder.
+        return CloudMetrics(recall, specificity, gmean, mcc, wdist=None)
     wdist = float(
         compute_topo_wdist(
             cloud.points, cloud.adbscan_params, cloud.clean_pc, topo_options
@@ -265,7 +267,7 @@ def grid_search_clouds(
                 "Set reproducibility.allow_skip_degenerate_grid_cells=true to opt in "
                 "to skipping failed cells."
             )
-        _, _, _, mcc, _ = _aggregate_cloud_metrics(per_cloud)
+        _, _, _, mcc = _aggregate_classification_metrics(per_cloud)
         n_ok += 1
         grid_log.append(
             {**params, "status": "ok", "mean_mcc": mcc, "n_clouds": len(per_cloud)}

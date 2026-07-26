@@ -300,7 +300,8 @@ def preflight_training_config(
         if not data_path.is_dir():
             raise FileNotFoundError(
                 f"MNIST data root missing: {data_path}. "
-                "Download MNIST first (e.g. run a short training job or place cached data under ./data)."
+                "Download MNIST first (e.g. run a short training job or place cached data under "
+                f"{root / 'data'})."
             )
 
     out_base = (config.get("outputs") or {}).get("base_dir")

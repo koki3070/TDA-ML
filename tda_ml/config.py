@@ -21,6 +21,11 @@ def default_project_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def default_data_root() -> Path:
+    """MNIST / dataset cache under the package-inferred repository root (cwd-independent)."""
+    return default_project_root() / "data"
+
+
 def load_config(config_name: str, *, project_root: Path | str | None = None) -> dict[str, Any]:
     """
     Merge ``configs/base.yaml`` with an environment-specific YAML.

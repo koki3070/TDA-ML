@@ -20,7 +20,7 @@ Canonical YAML files live **in this directory** (deep-merged with `base.yaml` by
 
 | File | Role |
 |------|------|
-| `elongate_n100_no_cls_tune_local_pca_ellphi_power_h1_neartangent_barrier.yaml` | Degeneracy guard: `aniso_mode=elongate_barrier`, `aniso_barrier_threshold=6.0`, `distance_backend=ellphi`. Opt-in via `BASE_CONFIG=...`; never an implicit swap. |
+| `elongate_n100_no_cls_tune_local_pca_ellphi_power_h1_neartangent_barrier.yaml` | Methods reference only: `aniso_mode=elongate_barrier`, `aniso_barrier_threshold=6.0`. Opt-in via `BASE_CONFIG=...`; never an implicit swap. No matching public full120 production YAML. |
 
 ## 置かないもの
 

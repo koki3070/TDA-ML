@@ -73,7 +73,7 @@ uv run python experiments/evaluate_paper_protocol.py \
 
 主表・チューニングの preflight は `homology_dimensions=[1]`、`teacher_mode=local_pca`、`prob_weighting=false`、`aniso_mode=elongate`、`distance_backend=ellphi`、`size_mode=power`、`w_class=0.0`、`teacher_local_pca_k=10`、`teacher_local_pca_normalize_axes=true` の明示を要求する。欠落や不一致は実行前に hard-fail する。本番 30ep は `--tune-json`（H1-only Optuna best）必須で、YAML 埋め込みの旧重みでは起動しない。
 
-**退化ガード variant（主表外・Methods opt-in）:** near-tangent データでは素の `elongate` が短軸→0 まで潰し、ellphi tangency が hard-fail し得る。対策として `aniso_mode: elongate_barrier`（`PAPER_NO_CLS_BARRIER_CONTRACT`、`aniso_barrier_threshold=6.0`、`distance_backend=ellphi`）を **YAML で明示したときだけ**使う。公開の tune 入口は `elongate_n100_no_cls_tune_local_pca_ellphi_power_h1_neartangent_barrier`（`BASE_CONFIG=...`）。暗黙の切替はしない。主表の ADBSCAN 比較には使わない。
+**退化ガード variant（主表外・Methods opt-in）:** near-tangent データでは素の `elongate` が短軸→0 まで潰し、ellphi tangency が hard-fail し得る。対策として `aniso_mode: elongate_barrier`（`PAPER_NO_CLS_BARRIER_CONTRACT`、`aniso_barrier_threshold=6.0`、`distance_backend=ellphi`）を **YAML で明示したときだけ**使う。公開参照 YAML は `elongate_n100_no_cls_tune_local_pca_ellphi_power_h1_neartangent_barrier`（`BASE_CONFIG=...`）。暗黙の切替はしない。主表の ADBSCAN 比較・本番 30ep 経路には使わない（対応する full120 本番 YAML は公開面に置かない）。
 
 ## 環境
 
@@ -97,8 +97,8 @@ uv run python experiments/evaluate_paper_protocol.py \
 ## データ（MNIST）
 
 - MNIST は git にコミットしません（`data/` は無視対象）。
-- 初回の学習またはデータセットアクセス時に、`torchvision` 経由で **`./data`** 以下にダウンロードされます（`configs/reproduce.yaml` を前提とした設定が典型です）。
-- 初回はインターネットに到達できるようにするか、キャッシュ済みの MNIST を自分で `./data` に置いてください。
+- 学習・paper eval ともデータ根は **リポジトリ根の `data/`**（`tda_ml.config.default_data_root()`）であり、プロセスの cwd には依存しません。初回アクセス時に `torchvision` 経由でそこにダウンロードされます。
+- 初回はインターネットに到達できるようにするか、キャッシュ済みの MNIST を自分でリポジトリ根の `data/` に置いてください。
 - 設定 YAML の役割分担は **`configs/README.md`** を参照（共有プロファイル + 論文用 `elongate_n100_no_cls_*`）。旧設定はローカルで `configs/archive/` に置けるが、公開クローンには同梱されない。
 
 ## チェックポイントと実行出力

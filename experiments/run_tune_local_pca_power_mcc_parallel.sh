@@ -49,6 +49,26 @@ Launch: \`bash experiments/run_tune_local_pca_power_mcc_parallel.sh ${N_WORKERS}
 EOF
 
 echo "Power MCC tune: ${N_WORKERS} workers, ${N_TRIALS} trials, ${TUNE_EPOCHS}ep, topo=${BACKEND}, DBSCAN=${DBSCAN_BACKEND}"
+echo "OUT_BASE=${OUT_BASE}"
+
+# Create the Optuna study once before spawning workers: concurrent
+# create_study(load_if_exists=True) on a fresh sqlite file races inside the
+# alembic schema migration ("table alembic_version already exists") and kills
+# the losing worker at startup. Same guard as the W-Dist launcher.
+STUDY_NAME="${STUDY_NAME}" STORAGE="${STORAGE}" uv run python - <<'PY'
+import os
+
+import optuna
+
+optuna.create_study(
+    study_name=os.environ["STUDY_NAME"],
+    storage=os.environ["STORAGE"],
+    direction="maximize",
+    load_if_exists=True,
+)
+print(f"study initialized: {os.environ['STUDY_NAME']}")
+PY
+
 pids=()
 for i in $(seq 0 $((N_WORKERS - 1))); do
   SEED=$((42 + i))

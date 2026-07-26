@@ -4,13 +4,22 @@ from __future__ import annotations
 
 import unittest
 
-from tda_ml.config import deep_update, default_project_root, load_config, model_kwargs_from_config
+from tda_ml.config import (
+    deep_update,
+    default_data_root,
+    default_project_root,
+    load_config,
+    model_kwargs_from_config,
+)
 
 
 class TestConfigProjectRoot(unittest.TestCase):
     def test_default_root_contains_configs_base(self) -> None:
         root = default_project_root()
         self.assertTrue((root / "configs" / "base.yaml").is_file())
+
+    def test_default_data_root_is_under_project_root(self) -> None:
+        self.assertEqual(default_data_root(), default_project_root() / "data")
 
     def test_load_dev_from_default_root(self) -> None:
         cfg = load_config("dev")

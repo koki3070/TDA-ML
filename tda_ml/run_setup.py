@@ -8,7 +8,9 @@ from typing import NamedTuple
 
 import torch
 
+from tda_ml.config import default_data_root
 from tda_ml.data_loader import NoisyMNISTDataset, create_data_loader
+from tda_ml.reproducibility import reproducibility_settings
 
 logger = logging.getLogger(__name__)
 
@@ -142,20 +144,17 @@ def build_dataloaders(config, seed: int, settings: DataLoaderSettings):
             "data.noise_std must be set explicitly; refusing silent default"
         )
 
+    repro = reproducibility_settings(config)
     dataset_kwargs = dict(
-        root="./data",
+        root=str(default_data_root()),
         max_points=data_cfg["max_points"],
         num_outliers=data_cfg["num_outliers"],
         noise_std=float(data_cfg["noise_std"]),
         deterministic=True,
         noise_seed=seed,
         outlier_mode=outlier_mode,
-        allow_empty_cloud_fallback=bool(
-            (config.get("reproducibility") or {}).get("allow_empty_cloud_fallback", False)
-        ),
-        allow_otsu_threshold_fallback=bool(
-            (config.get("reproducibility") or {}).get("allow_otsu_threshold_fallback", False)
-        ),
+        allow_empty_cloud_fallback=repro["allow_empty_cloud_fallback"],
+        allow_otsu_threshold_fallback=repro["allow_otsu_threshold_fallback"],
     )
 
     if outlier_mode == "local_pca_tangent":

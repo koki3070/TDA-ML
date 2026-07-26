@@ -6,6 +6,8 @@ from skimage.filters import threshold_otsu
 from torch.utils.data import DataLoader, Dataset
 from torchvision import datasets
 
+from tda_ml.config import default_data_root
+
 logger = logging.getLogger(__name__)
 
 
@@ -18,7 +20,8 @@ class NoisyMNISTDataset(Dataset):
     noise, and augmented with outlier points.
 
     Args:
-        root (str): Path to store/load MNIST data.
+        root (str | None): Path to store/load MNIST data. ``None`` resolves to
+            ``tda_ml.config.default_data_root()`` (repo-root ``data/``, cwd-independent).
         train (bool): Use training split if True, else test split.
         num_samples (int): Number of samples to use (randomly subsampled).
         max_points (int): Fixed number of inlier points per sample.
@@ -48,7 +51,7 @@ class NoisyMNISTDataset(Dataset):
         clean_pc (Tensor): Shape (max_points, 2). Noise-free inlier points (zero-padded).
     """
 
-    def __init__(self, root='./data', train=True, num_samples=5000,
+    def __init__(self, root=None, train=True, num_samples=5000,
                  max_points=150, num_outliers=20, noise_std=0.01,
                  deterministic=False, indices=None, noise_seed=0, preload=True,
                  allow_empty_cloud_fallback=False,
@@ -60,6 +63,8 @@ class NoisyMNISTDataset(Dataset):
                  tangent_angle_jitter_deg=0.0,
                  tangent_stroke_clearance=0.0,
                  tangent_direction="tangent"):
+        if root is None:
+            root = str(default_data_root())
         self.max_points = max_points
         self.num_outliers = num_outliers
         self.noise_std = noise_std
@@ -309,7 +314,7 @@ class PreloadedOutlierMNIST(NoisyMNISTDataset):
 
     def __init__(
         self,
-        root="./data",
+        root=None,
         train=True,
         num_samples=5000,
         max_points=150,
@@ -355,7 +360,7 @@ def get_dataset(config):
         )
     if dtype == "mnist":
         return PreloadedOutlierMNIST(
-            root=str(data_cfg.get("root", "./data")),
+            root=str(data_cfg["root"]) if "root" in data_cfg else str(default_data_root()),
             train=bool(data_cfg.get("train", False)),
             num_samples=int(data_cfg["num_samples"]),
             max_points=int(data_cfg["max_points"]),
