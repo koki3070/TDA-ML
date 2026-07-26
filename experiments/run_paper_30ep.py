@@ -22,8 +22,8 @@ from tda_ml.preflight import (  # noqa: E402
 )
 
 BASE_CONFIG = "paper_n100_o20_nocls_h1_ellphi_lpca_power"
-TAG_MCC = "power_mcc_valtopo_paper_eval"
-TAG_WDIST = "power_wdist_valtopo_paper_eval"
+TAG_MCC = "mcc"
+TAG_WDIST = "wdist"
 
 
 def parse_args() -> argparse.Namespace:
@@ -119,9 +119,9 @@ def main() -> int:
     out_base = args.out_base
     if out_base is None:
         if tag == TAG_WDIST:
-            out_base = REPO_ROOT / "outputs/supervised/pwr30_wdist"
+            out_base = REPO_ROOT / "outputs/supervised/paper30_wdist"
         else:
-            out_base = REPO_ROOT / "outputs/supervised/pwr30_mcc_maha"
+            out_base = REPO_ROOT / "outputs/supervised/paper30_mcc"
     out_base = out_base.resolve()
     out_base.mkdir(parents=True, exist_ok=True)
 
@@ -176,8 +176,8 @@ def main() -> int:
         cfg,
         {
             "meta": {
-                "config_id": f"teacher_local_pca_power_seed{args.seed}",
-                "run_slug": f"pwr_s{args.seed}",
+                "config_id": f"paper_seed{args.seed}",
+                "run_slug": f"paper_s{args.seed}",
             },
             "loss": loss_overrides,
             "training": training_overrides,
@@ -214,7 +214,7 @@ def main() -> int:
         "homology_dimensions": cfg["model"]["topology_loss"]["homology_dimensions"],
         "paper_no_cls_contract": paper_contract,
         "protocol_note": (
-            "power 30ep H1-only: raw ellipse params to ellphi; degenerate geometry "
+            "paper 30ep H1-only: raw ellipse params to ellphi; degenerate geometry "
             "hard-fails; tune weights fixed from seed-42 Optuna"
         ),
         "reference": tune_source,
@@ -259,7 +259,7 @@ def main() -> int:
     if args.skip_eval:
         return 0
 
-    eval_script = REPO_ROOT / "experiments" / "evaluate_paper_protocol.py"
+    eval_script = REPO_ROOT / "experiments" / "eval_paper.py"
     for split in ("val", "test"):
         cmd = [
             "uv",

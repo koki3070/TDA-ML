@@ -1,7 +1,7 @@
 # Shared Optuna tune base for W-Dist and MCC studies (same stack as paper YAML).
 # Naming matches paper_n100_o20_nocls_h1_ellphi_lpca_power except role=tune
 # (default epochs=20; drivers may override). Trial objective is chosen by the
-# tune driver (tune_elongate_wdist.py vs tune_elongate_mcc.py), not by config_id.
+# tune driver (tune_wdist.py vs tune_mcc.py), not by config_id.
 
 meta:
   config_id: "tune_n100_o20_nocls_h1_ellphi_lpca_power"

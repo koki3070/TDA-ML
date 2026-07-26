@@ -21,10 +21,14 @@ def short_backend(name: str) -> str:
 
 
 def shorten_config_id(config_id: str, *, max_len: int = 24) -> str:
-    """Derive a compact slug from a legacy config_id."""
+    """Derive a compact slug from a config_id (including legacy aliases)."""
+    m = re.fullmatch(r"paper_seed(\d+)", config_id)
+    if m:
+        return f"paper_s{m.group(1)}"
+
     m = re.fullmatch(r"teacher_local_pca_power_seed(\d+)", config_id)
     if m:
-        return f"pwr_s{m.group(1)}"
+        return f"paper_s{m.group(1)}"  # legacy alias
 
     m = re.fullmatch(r"teacher_local_pca_(ellphi|mahalanobis)_seed(\d+)", config_id)
     if m:
@@ -38,7 +42,7 @@ def shorten_config_id(config_id: str, *, max_len: int = 24) -> str:
     if m:
         return f"t{m.group(1)}"
 
-    m = re.fullmatch(r"tune_elongate_t(\d+)", config_id)
+    m = re.fullmatch(r"tune_t(\d+)", config_id)
     if m:
         return f"t{m.group(1)}"
 

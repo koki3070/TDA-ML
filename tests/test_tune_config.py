@@ -10,8 +10,8 @@ from unittest import mock
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "experiments"))
 
-from tune_elongate_mcc import build_trial_config as build_mcc_trial  # noqa: E402
-from tune_elongate_wdist import build_trial_config as build_wdist_trial  # noqa: E402
+from tune_mcc import build_trial_config as build_mcc_trial  # noqa: E402
+from tune_wdist import build_trial_config as build_wdist_trial  # noqa: E402
 
 
 class TestTuneTrialConfig(unittest.TestCase):
@@ -78,7 +78,7 @@ class TestTuneTrialConfig(unittest.TestCase):
         divergent["loss"]["aniso_mode"] = "linear"
 
         with mock.patch(
-            "tune_elongate_wdist.load_config",
+            "tune_wdist.load_config",
             side_effect=lambda *a, **k: deepcopy(divergent),
         ):
             # aniso_mode is now mirrored from the base config declaration, so a
@@ -99,7 +99,7 @@ class TestTuneTrialConfig(unittest.TestCase):
 
         divergent["loss"]["aniso_mode"] = "elongate"
         with mock.patch(
-            "tune_elongate_wdist.load_config",
+            "tune_wdist.load_config",
             side_effect=lambda *a, **k: deepcopy(divergent),
         ):
             cfg = build_wdist_trial(
@@ -131,7 +131,7 @@ class TestTuneTrialConfig(unittest.TestCase):
         barrier["loss"]["aniso_barrier_threshold"] = 6.0
 
         with mock.patch(
-            "tune_elongate_wdist.load_config",
+            "tune_wdist.load_config",
             side_effect=lambda *a, **k: deepcopy(barrier),
         ):
             cfg = build_wdist_trial(

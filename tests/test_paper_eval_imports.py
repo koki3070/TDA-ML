@@ -16,8 +16,8 @@ from tda_ml.reproducibility import build_reproducibility_manifest_fields
 
 class TestPaperEvalImports(unittest.TestCase):
     def test_baselines_and_protocol_import(self):
-        import experiments.evaluate_paper_baselines as baselines
-        import experiments.evaluate_paper_protocol as protocol
+        import experiments.eval_baselines as baselines
+        import experiments.eval_paper as protocol
 
         self.assertTrue(callable(baselines.evaluate_adbscan))
         self.assertTrue(callable(protocol.load_model_from_run))
@@ -28,7 +28,7 @@ class TestPaperEvalImports(unittest.TestCase):
         from tda_ml.config import default_data_root
         from tda_ml.run_setup import default_data_root as train_data_root
 
-        import experiments.evaluate_paper_protocol as protocol
+        import experiments.eval_paper as protocol
 
         self.assertIs(protocol.default_data_root, default_data_root)
         self.assertIs(train_data_root, default_data_root)

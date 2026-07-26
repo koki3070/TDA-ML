@@ -152,17 +152,17 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--wdist-out", type=Path, default=REPO_ROOT / "outputs/supervised/pwr30_wdist")
-    p.add_argument("--mcc-out", type=Path, default=REPO_ROOT / "outputs/supervised/pwr30_mcc_maha")
+    p.add_argument("--wdist-out", type=Path, default=REPO_ROOT / "outputs/supervised/paper30_wdist")
+    p.add_argument("--mcc-out", type=Path, default=REPO_ROOT / "outputs/supervised/paper30_mcc")
     p.add_argument(
         "--wdist-tune-json",
-        default="outputs/tune/pwr_wdist/best_elongate_wdist_ellphi.json",
+        default="outputs/tune/wdist/best_wdist_ellphi.json",
     )
     p.add_argument(
         "--mcc-tune-json",
-        default="outputs/tune/pwr_mcc_dbscan_mahalanobis/best_elongate_mcc_ellphi_dbscan_mahalanobis.json",
+        default="outputs/tune/mcc_dbscan_mahalanobis/best_mcc_ellphi_dbscan_mahalanobis.json",
     )
-    p.add_argument("--out-dir", type=Path, default=REPO_ROOT / "outputs/supervised/pwr30_multiseed")
+    p.add_argument("--out-dir", type=Path, default=REPO_ROOT / "outputs/supervised/paper30_multiseed")
     p.add_argument("--seeds", type=int, nargs="+", default=PAPER_SEEDS)
     p.add_argument(
         "--methods",
@@ -203,16 +203,16 @@ def main() -> int:
 
     wdist_by_seed = discover_seed_metrics(
         args.wdist_out,
-        "pwr_s*/logs/paper_metrics_test_power_wdist_valtopo_paper_eval.json",
+        "paper_s*/logs/paper_metrics_test_wdist.json",
     )
     mcc_by_seed = discover_seed_metrics(
         args.mcc_out,
-        "pwr_s*/logs/paper_metrics_test_power_mcc_valtopo_paper_eval.json",
+        "paper_s*/logs/paper_metrics_test_mcc.json",
     )
 
     method_specs = {
-        "wdist": ("proposed_wdist_tune_30ep", wdist_by_seed, str(tune_paths["wdist"])),
-        "mcc": ("proposed_mcc_tune_30ep", mcc_by_seed, str(tune_paths["mcc"])),
+        "wdist": ("proposed_wdist_30ep", wdist_by_seed, str(tune_paths["wdist"])),
+        "mcc": ("proposed_mcc_30ep", mcc_by_seed, str(tune_paths["mcc"])),
     }
     rows: list[dict[str, Any]] = []
     for key in args.methods:

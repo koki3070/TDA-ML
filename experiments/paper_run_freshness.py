@@ -39,7 +39,7 @@ def inspect_seed_metrics(
     expected_revision: str | None = None,
 ) -> tuple[str, list[Path]]:
     """Return ``(status, paths)`` where status is fresh|missing|stale|ambiguous."""
-    pattern = f"pwr_s{seed}_*/logs/paper_metrics_test_{tag}.json"
+    pattern = f"paper_s{seed}_*/logs/paper_metrics_test_{tag}.json"
     matches = sorted(out_base.glob(pattern))
     if not matches:
         return "missing", []

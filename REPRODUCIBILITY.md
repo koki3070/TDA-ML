@@ -7,20 +7,20 @@
 - **含む:** `tda_ml/`、**`configs/` 直下の正本 YAML**（`base.yaml` と `reproduce` / `dev` / `prod` / `test_fast`、および論文比較用の `paper_n100_o20_nocls_h1_ellphi_lpca_power` / `tune_n100_o20_nocls_h1_ellphi_lpca_power`）、`tests/`、追跡されている `scripts/`、論文・再現用 `experiments/`（下記）、および `README.md` / `REPRODUCIBILITY.md` / `pyproject.toml` / `uv.lock` / `LICENSE` / `CITATION.cff` などのメタデータ。
 - **含めない:** `docs/` 以下（**ローカル実験メモ**；公開方針で git に入れる場合は別途決定）、`configs/archive/`（履歴用 YAML を置く場合は **ローカルのみ**）、`outputs/`、`data/`、`.cursor/` など。`load_config("archive/...")` は、手元に `configs/archive/*.yaml` を置いた場合にのみ使えます。
 
-### 論文比較（ellphi + power 二目的）で使う `experiments/`
+### 論文比較（W-Dist / MCC 二目的）で使う `experiments/`
 
-**論文主表の提案:** W-Dist tune 重みの 30ep 5-seed（`run_teacher_local_pca_power_30ep_multiseed.sh wdist`）。
+**論文主表の提案:** W-Dist tune 重みの 30ep 5-seed（`run_paper_30ep_multiseed.sh wdist`）。
 **主張:** Euclidean DBSCAN / ADBSCAN と **同程度の外れ値除去性能**（MCC / G-Mean；5 seed の mean ± sample std による**記述的**比較。同等性検定は行わない）。主表に Topo W. 列は載せない。
 **比較の非対称:** ADBSCAN は学習なしの局所 PCA 楕円ベースライン。提案法は同一データで 30ep 学習する（計算資源・パラメータ更新は対等ではない）。
 **正本 config:** `paper_n100_o20_nocls_h1_ellphi_lpca_power`（`w_class=0`, `homology_dimensions=[1]`, `aniso_mode=elongate`）。
-出力先は `WDIST_OUT` / `MCC_OUT` / `LOG_ROOT`（既定: `outputs/supervised/pwr30_*`）で明示する（生成物は git に含めない）。
+出力先は `WDIST_OUT` / `MCC_OUT` / `LOG_ROOT`（既定: `outputs/supervised/paper30_*`）で明示する（生成物は git に含めない）。
 
 | 区分 | パス |
 |------|------|
-| 本番 5-seed | `run_teacher_local_pca_power_30ep_multiseed.sh`, `run_teacher_local_pca_power_30ep.py`, `aggregate_power_30ep_multiseed.py` |
-| paper eval | `evaluate_paper_protocol.py`（`best_model.pth` のみ） |
-| ベースライン | `evaluate_paper_baselines.py` |
-| チューニング（重みの出所） | `tune_elongate_wdist.py`, `tune_elongate_mcc.py`, `run_tune_local_pca_power_*` |
+| 本番 5-seed | `run_paper_30ep_multiseed.sh`, `run_paper_30ep.py`, `aggregate_paper_multiseed.py` |
+| paper eval | `eval_paper.py`（`best_model.pth` のみ） |
+| ベースライン | `eval_baselines.py` |
+| チューニング（重みの出所） | `tune_wdist.py`, `tune_mcc.py`, `tune_wdist_parallel.sh`, `tune_mcc_parallel.sh`, `tune_objectives.sh` |
 
 **実行記録:** 各 run の `source_revision`（git HEAD）は `logs/run_manifest.json` および `paper_metrics_*.json` に記録。未コミットのまま実行した場合、リモート clone では数値が再現できない。
 
@@ -31,19 +31,19 @@ checkpoint は **`best_model.pth`（`selection=val_topo`）のみ**。欠落は 
 **1. Tune（主表は W-Dist；YAML の data.seed=42。Optuna sampler seed は worker ごとに異なる）**
 
 ```bash
-MODE=wdist bash experiments/run_tune_local_pca_power_objectives.sh
+MODE=wdist bash experiments/tune_objectives.sh
 ```
 
 **2. 本番 30ep × 5-seed（tune JSON 必須）→ 内部で paper eval**
 
 ```bash
-bash experiments/run_teacher_local_pca_power_30ep_multiseed.sh wdist
+bash experiments/run_paper_30ep_multiseed.sh wdist
 ```
 
 **3. ベースライン（ADBSCAN 等）**
 
 ```bash
-uv run python experiments/evaluate_paper_baselines.py \
+uv run python experiments/eval_baselines.py \
   --base-config paper_n100_o20_nocls_h1_ellphi_lpca_power \
   --out-dir outputs/paper_baselines
 ```
@@ -51,11 +51,11 @@ uv run python experiments/evaluate_paper_baselines.py \
 単一 seed・手動 eval:
 
 ```bash
-uv run python experiments/run_teacher_local_pca_power_30ep.py \
-  --tune-json outputs/tune/pwr_wdist/best_elongate_wdist_ellphi.json \
+uv run python experiments/run_paper_30ep.py \
+  --tune-json outputs/tune/wdist/best_wdist_ellphi.json \
   --seed 42
 
-uv run python experiments/evaluate_paper_protocol.py \
+uv run python experiments/eval_paper.py \
   --run-dir outputs/supervised/.../pwr_s42_<stamp> \
   --base-config paper_n100_o20_nocls_h1_ellphi_lpca_power \
   --split val
@@ -187,7 +187,7 @@ uv run python experiments/run_backend_multiseed.py \
 
 ### ellphi + power：二目的チューニング（実験メモ）
 
-no_cls・local_pca 教師・`size_mode=power` スタックでは、`run_tune_local_pca_power_objectives.sh` が **W-Dist 最小**と **DBSCAN MCC 最大**の 2 本の Optuna study を実行し、`run_teacher_local_pca_power_30ep_multiseed.sh` が固定した best 重みで 30ep 本番を実行します。
+no_cls・local_pca 教師・`size_mode=power` スタックでは、`tune_objectives.sh` が **W-Dist 最小**と **DBSCAN MCC 最大**の 2 本の Optuna study を実行し、`run_paper_30ep_multiseed.sh` が固定した best 重みで 30ep 本番を実行します。
 
 要点: **学習 topo loss と教師 PD は ellphi**；**MCC のチューニング objective と paper eval の DBSCAN は mahalanobis**（filtration 時刻をクラスタリング距離に使わない）。
 

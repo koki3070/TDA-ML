@@ -11,9 +11,9 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "experiments"))
 
-from aggregate_power_30ep_multiseed import discover_seed_metrics  # noqa: E402
-from power_30ep_freshness import inspect_seed_metrics  # noqa: E402
-from run_teacher_local_pca_power_30ep import (  # noqa: E402
+from aggregate_paper_multiseed import discover_seed_metrics  # noqa: E402
+from paper_run_freshness import inspect_seed_metrics  # noqa: E402
+from run_paper_30ep import (  # noqa: E402
     TAG_MCC,
     TAG_WDIST,
     infer_tag,
@@ -27,7 +27,7 @@ class TestAggregateDiscover(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             for i, mcc in enumerate([0.1, 0.9]):
-                logs = root / f"pwr_s42_run{i}" / "logs"
+                logs = root / f"paper_s42_run{i}" / "logs"
                 logs.mkdir(parents=True)
                 (logs / "run_manifest.json").write_text(
                     json.dumps({"seed": 42, "tune_json": "/x.json"}),
@@ -45,7 +45,7 @@ class TestAggregateDiscover(unittest.TestCase):
     def test_missing_manifest_seed_hard_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            logs = root / "pwr_s42_x" / "logs"
+            logs = root / "paper_s42_x" / "logs"
             logs.mkdir(parents=True)
             (logs / "paper_metrics_test_foo.json").write_text(
                 json.dumps({"mcc": 0.1, "gmean": 0.5, "wdist": 1.0}),
@@ -130,7 +130,7 @@ class TestFreshness(unittest.TestCase):
             status, paths = inspect_seed_metrics(
                 out_base=Path(tmp),
                 seed=42,
-                tag="power_wdist_valtopo_paper_eval",
+                tag="wdist",
                 tune_json=Path(tmp) / "missing.json",
                 expected_revision="deadbeef",
             )
@@ -142,7 +142,7 @@ class TestFreshness(unittest.TestCase):
             root = Path(tmp)
             tune = root / "best.json"
             tune.write_text("{}", encoding="utf-8")
-            logs = root / "pwr_s42_x" / "logs"
+            logs = root / "paper_s42_x" / "logs"
             logs.mkdir(parents=True)
             (logs / "run_manifest.json").write_text(
                 json.dumps(
@@ -155,12 +155,12 @@ class TestFreshness(unittest.TestCase):
                 encoding="utf-8",
             )
             (
-                logs / "paper_metrics_test_power_wdist_valtopo_paper_eval.json"
+                logs / "paper_metrics_test_wdist.json"
             ).write_text("{}", encoding="utf-8")
             status, _ = inspect_seed_metrics(
                 out_base=root,
                 seed=42,
-                tag="power_wdist_valtopo_paper_eval",
+                tag="wdist",
                 tune_json=tune,
                 expected_revision="newrev",
             )

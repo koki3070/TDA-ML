@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Optuna tuning of elongate hyperparameters (val topo W-Dist objective).
+Optuna tuning of paper loss weights (val topo W-Dist objective).
 
 Search space (log-uniform): ``w_aniso``, ``w_size``, ``w_topo``, ``lr``.
 
@@ -15,7 +15,7 @@ Base config ``tune_n100_o20_nocls_h1_ellphi_lpca_power`` sets
 
 Usage (parallel, recommended)::
 
-    bash experiments/run_tune_local_pca_power_wdist_parallel.sh 8 50 20 ellphi
+    bash experiments/tune_wdist_parallel.sh 8 50 20 ellphi
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ from tda_ml.preflight import paper_aniso_fields, preflight_wdist_tune_study
 from tda_ml.supervised_diagnostics import git_revision
 from tda_ml.topo_wdist import TopoWdistOptions, compute_topo_wdist, topo_wdist_options_from_config
 
-from evaluate_paper_protocol import (  # noqa: E402
+from eval_paper import (  # noqa: E402
     build_split_loader,
     iter_cloud_predictions,
     load_model_from_run,
@@ -48,7 +48,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CHECKPOINT_POLICY = "val_topo_best"
 SAVE_EVERY = 1
 
-# Narrow bands (shared with tune_elongate_mcc power protocol).
+# Narrow bands (shared with tune_mcc power protocol).
 NARROW_W_TOPO_RANGE = (0.05, 0.25)
 NARROW_W_SIZE_RANGE = (0.1, 0.6)
 NARROW_W_ANISO_RANGE = (0.03, 0.15)
@@ -91,7 +91,7 @@ def build_trial_config(
 ) -> dict[str, Any]:
     cfg = load_config(base_config, project_root=REPO_ROOT)
     overrides = {
-        "meta": {"config_id": f"tune_elongate_t{trial_number:03d}", "run_slug": f"t{trial_number:03d}"},
+        "meta": {"config_id": f"tune_t{trial_number:03d}", "run_slug": f"t{trial_number:03d}"},
         "loss": {
             "w_aniso": float(w_aniso),
             "w_size": float(w_size),
@@ -216,7 +216,7 @@ def parse_args() -> argparse.Namespace:
         choices=["mahalanobis", "ellphi"],
         help="Training topo-loss backend (ellphi = ellipse tangency filtration).",
     )
-    p.add_argument("--out-base", type=str, default="outputs/tune/pwr_wdist")
+    p.add_argument("--out-base", type=str, default="outputs/tune/wdist")
     p.add_argument(
         "--size-mode",
         default="power",
@@ -227,7 +227,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--narrow-search",
         action="store_true",
-        help="Use narrow search bands (same as tune_elongate_mcc power protocol).",
+        help="Use narrow search bands (same as tune_mcc power protocol).",
     )
     p.add_argument("--seed", type=int, default=42, help="Optuna sampler seed")
     p.add_argument(
@@ -239,13 +239,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--study-name",
         type=str,
-        default="elongate_wdist_4d",
+        default="tune_wdist",
         help="Study name (shared across parallel workers when using --storage).",
     )
     p.add_argument(
         "--write-best",
         action="store_true",
-        help="Write best_elongate_wdist.json at the end (run once after all workers).",
+        help="Write best_wdist.json at the end (run once after all workers).",
     )
     return p.parse_args()
 
@@ -279,7 +279,7 @@ def main() -> int:
     preflight.update(
         {
             "run_status": "pending",
-            "command_entry": "experiments/tune_elongate_wdist.py",
+            "command_entry": "experiments/tune_wdist.py",
             "source_revision": git_revision(REPO_ROOT),
             "study_name": args.study_name,
             "storage": args.storage,
@@ -365,7 +365,7 @@ def main() -> int:
             for t in study.trials
         ],
     }
-    out_path = Path(args.out_base) / f"best_elongate_wdist_{args.backend}.json"
+    out_path = Path(args.out_base) / f"best_wdist_{args.backend}.json"
     out_path.write_text(json.dumps(payload, indent=2) + "\n")
     print(json.dumps({k: payload[k] for k in (
         "best_value_wdist", "best_params", "best_checkpoint_epoch",

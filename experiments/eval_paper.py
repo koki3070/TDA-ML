@@ -7,12 +7,12 @@ clean teacher PD (local PCA + ellphi by default). DBSCAN affects MCC only.
 
 Usage::
 
-    uv run python experiments/evaluate_paper_protocol.py \\
-        --run-dir outputs/supervised/.../pwr_s42_<stamp> \\
+    uv run python experiments/eval_paper.py \\
+        --run-dir outputs/supervised/.../paper_s42_<stamp> \\
         --base-config paper_n100_o20_nocls_h1_ellphi_lpca_power \\
         --split val
 
-    uv run python experiments/evaluate_paper_protocol.py \\
+    uv run python experiments/eval_paper.py \\
         --run-dir ... --split test \\
         --dbscan-hparams outputs/.../logs/dbscan_hparams.json
 """
