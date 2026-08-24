@@ -21,9 +21,10 @@ model:
   ellipse_param_dim: 5
   topology_loss:
     metric_type: "anisotropic"
-    distance_backend: "mahalanobis"
+    distance_backend: "ellphi"
+    ellphi_differentiable: true
     homology_dimensions: [0, 1]
-    prob_weighting: true
+    prob_weighting: false
 
 data:
   train_size: 80

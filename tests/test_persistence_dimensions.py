@@ -72,7 +72,7 @@ class TestPersistenceDimensions(unittest.TestCase):
             "model": {
                 "topology_loss": {
                     "homology_dimensions": [1],
-                    "distance_backend": "mahalanobis",
+                    "distance_backend": "ellphi",
                     "prob_weighting": False,
                 }
             },
@@ -94,7 +94,7 @@ class TestPersistenceDimensions(unittest.TestCase):
             "model": {
                 "topology_loss": {
                     "homology_dimensions": [1],
-                    "distance_backend": "mahalanobis",
+                    "distance_backend": "ellphi",
                     "prob_weighting": False,
                 }
             },
@@ -128,7 +128,7 @@ class TestPersistenceDimensions(unittest.TestCase):
         clean = [VietorisRipsComplex(dim=1)(points[0])]
         loss_fn = TopologicalLoss(
             weight=1.0,
-            distance_backend="mahalanobis",
+            distance_backend="ellphi",
             prob_weighting=False,
             homology_dimensions=[1],
         )

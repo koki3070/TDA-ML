@@ -11,10 +11,11 @@ model:
   threshold: 0.5
   topology_loss:
     metric_type: "anisotropic"
-    distance_backend: "mahalanobis"  # overridden per run by run_backend_multiseed
+    distance_backend: "ellphi"
     ellphi_differentiable: true
     homology_dimensions: [0, 1]
-    prob_weighting: true  # ellphi runs set false in the multiseed driver
+    # ellphi does not implement outlier-prob weighting.
+    prob_weighting: false
 
 loss:
   w_class: 1.0

@@ -313,7 +313,7 @@ class TestDbscanGridStrict(unittest.TestCase):
         cloud = self._toy_cloud()
         opts = TopoWdistOptions(
             teacher_mode="euclidean",
-            distance_backend="mahalanobis",
+            distance_backend="ellphi",
             homology_dimensions=(0, 1),
             prob_weighting=False,
         )
@@ -348,7 +348,7 @@ class TestTopologicalLossStrict(unittest.TestCase):
 
         loss_fn = TopologicalLoss(
             weight=1.0,
-            distance_backend="mahalanobis",
+            distance_backend="ellphi",
             prob_weighting=False,
             homology_dimensions=[0, 1],
             strict_topo_samples=True,

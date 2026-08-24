@@ -45,6 +45,7 @@ class TestTrainer(unittest.TestCase):
                 'w_topo': 0.1,
                 'w_aniso': 0.01,
                 'w_size': 0.1,
+                'pos_weight': 1.0,
                 'teacher_mode': 'euclidean',
                 'aniso_mode': 'linear',
                 'size_mode': 'quadratic',
@@ -55,9 +56,9 @@ class TestTrainer(unittest.TestCase):
             },
             'model': {
                 'topology_loss': {
-                    'distance_backend': 'mahalanobis',
+                    'distance_backend': 'ellphi',
                     'homology_dimensions': [0, 1],
-                    'prob_weighting': True,
+                    'prob_weighting': False,
                     'ellphi_differentiable': True,
                 }
             },
@@ -107,6 +108,7 @@ class TestTrainer(unittest.TestCase):
             "w_topo": 0.1,
             "w_aniso": 0.01,
             "w_size": 0.1,
+            "pos_weight": 1.0,
             "teacher_mode": "euclidean",
             "aniso_mode": "linear",
             "size_mode": "quadratic",
@@ -115,7 +117,6 @@ class TestTrainer(unittest.TestCase):
             "topo_eps_scale": 1.0,
             "topo_scale_mode": "fixed",
         }
-        self.config["model"]["topology_loss"]["prob_weighting"] = False
         trainer = Trainer(self.model, self.config, self.device)
         self.assertEqual(trainer.lambda_class, 0.0)
 

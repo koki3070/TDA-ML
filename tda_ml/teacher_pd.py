@@ -29,7 +29,7 @@ def compute_clean_teacher_batch(
     vr_complex: VietorisRipsComplex,
     *,
     teacher_mode: str = TEACHER_MODE_EUCLIDEAN,
-    distance_backend: str = "mahalanobis",
+    distance_backend: str = "ellphi",
     ellphi_differentiable: bool = False,
     local_pca_k: int = 10,
     local_pca_normalize_axes: bool = True,

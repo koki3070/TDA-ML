@@ -1,5 +1,10 @@
 """
-Distance-matrix backends: differentiable anisotropic Mahalanobis and ellphi tangency distance.
+Distance-matrix backends for topological loss / teacher PD.
+
+Training PD filtration uses **ellphi** tangency distance only. Mahalanobis-style
+anisotropic distances remain available for **DBSCAN clustering** via
+``tda_ml.topology.compute_anisotropic_distance_matrix`` / ``tda_ml.dbscan``
+(paper MCC protocol); they are not a training-PD backend.
 
 The differentiable ellphi path connects ``ellphi.grad`` functions
 (``coef_from_cov_grad`` / ``pdist_tangency_grad``) through a PyTorch
@@ -18,7 +23,6 @@ from tda_ml.ellphi_torch import (
 )
 from tda_ml.geometry import ellipse_params_to_centers_cov_numpy
 from tda_ml.numerical_eps import NUMERICAL_EPS
-from tda_ml.topology import compute_anisotropic_distance_matrix
 
 try:
     import ellphi
@@ -30,16 +34,20 @@ try:
 except ImportError:
     squareform = None  # type: ignore[misc, assignment]
 
-DISTANCE_MODE_MAHALANOBIS = "mahalanobis"
 DISTANCE_MODE_ELLPHI = "ellphi"
 
 
 def normalize_topo_distance_mode(mode: str) -> str:
     m = str(mode).strip().lower()
-    if m == "mahalanobis":
-        return DISTANCE_MODE_MAHALANOBIS
     if m == "ellphi":
         return DISTANCE_MODE_ELLPHI
+    if m == "mahalanobis":
+        raise ValueError(
+            "distance_backend='mahalanobis' is not supported for training PD / "
+            "topo W-Dist filtration. Use 'ellphi' for PD; mahalanobis remains "
+            "available only as the paper DBSCAN clustering backend "
+            "(evaluation.dbscan.backend / --dbscan-backend)."
+        )
     raise ValueError(f"Unknown topo distance mode: {mode!r}")
 
 
@@ -119,30 +127,22 @@ def compute_distance_matrix_batch(
     ellphi_differentiable: bool = True,
 ) -> torch.Tensor:
     """
-    Compute batched distance matrices with shape ``(B, N, N)``.
+    Compute batched distance matrices with shape ``(B, N, N)`` for training PD.
 
-    backend:
-      - ``mahalanobis``: ``compute_anisotropic_distance_matrix`` (differentiable)
-      - ``ellphi``: tangency distance. If ``ellphi_differentiable=True`` and
-        ``ellphi.grad`` is available, gradients flow to centers/covariances.
-        Missing grad API is a hard-fail (no NumPy fallback).
+    Only ``ellphi`` is supported. ``mahalanobis`` hard-fails here (use DBSCAN
+    helpers in ``tda_ml.dbscan`` / ``topology`` for clustering distances).
 
-    For ``ellphi``, requesting ``probs``-based weighting hard-fails because that
-    method is not implemented.
+    If ``ellphi_differentiable=True`` and ``ellphi.grad`` is available, gradients
+    flow to centers/covariances. Missing grad API is a hard-fail (no NumPy fallback).
+    Requesting ``probs``-based weighting hard-fails (not implemented for ellphi).
     """
-    b = backend.lower().strip()
-    if b not in ("mahalanobis", "ellphi"):
-        raise ValueError(f"Unknown distance backend: {backend!r}. Use 'mahalanobis' or 'ellphi'.")
-
-    if b == "mahalanobis":
-        return compute_anisotropic_distance_matrix(
-            points, params, probs=probs, symmetrize=symmetrize
-        )
+    del symmetrize  # ellphi path does not use Mahalanobis symmetrization.
+    normalize_topo_distance_mode(backend)
 
     if probs is not None:
         raise RuntimeError(
             "distance_backend='ellphi' does not implement probability weighting; "
-            "set model.topology_loss.prob_weighting=false or use mahalanobis. "
+            "set model.topology_loss.prob_weighting=false. "
             "Refusing to ignore the requested method."
         )
 
@@ -180,14 +180,13 @@ def compute_topo_distance_matrix(
     points: torch.Tensor,
     params: torch.Tensor,
     *,
-    distance_mode: str = "mahalanobis",
+    distance_mode: str = "ellphi",
     ellphi_backend: str = "auto",
 ) -> torch.Tensor:
     """
     Shared topology-loss entrypoint: map batched points/ellipse params to ``(B,N,N)`` distances.
 
-    ``distance_mode`` is ``mahalanobis`` or ``ellphi``.
-    Differentiable ellphi requires ``ellphi.grad``; otherwise hard-fail.
+    ``distance_mode`` must be ``ellphi``. Differentiable ellphi requires ``ellphi.grad``.
     """
     backend = normalize_topo_distance_mode(distance_mode)
     eb = str(ellphi_backend).strip().lower()
@@ -199,11 +198,4 @@ def compute_topo_distance_matrix(
         symmetrize="max",
         backend=backend,
         ellphi_differentiable=ellphi_diff,
-    )
-
-
-def mahalanobis_distance_matrix_batched(points: torch.Tensor, params: torch.Tensor) -> torch.Tensor:
-    """Mahalanobis-style batched distance matrix without probability weighting."""
-    return compute_anisotropic_distance_matrix(
-        points, params, probs=None, symmetrize="max"
     )

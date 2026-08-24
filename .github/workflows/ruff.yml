@@ -62,7 +62,8 @@ jobs:
       - name: Pytest
         run: uv run pytest -q
 
-      # One epoch, one seed, mahalanobis only (README / REPRODUCIBILITY.md). Fresh out-base per run.
+      # One epoch, one seed, ellphi PD filtration (README / REPRODUCIBILITY.md).
+      # Fresh out-base per run. DBSCAN mahalanobis is separate (paper eval).
       - name: Repro smoke (run_backend_multiseed)
         run: |
           set -euo pipefail
@@ -71,5 +72,5 @@ jobs:
             --base-config reproduce \
             --epochs 1 \
             --seeds 42 \
-            --backends mahalanobis \
+            --backends ellphi \
             --out-base "$OUT"

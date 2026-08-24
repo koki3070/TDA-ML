@@ -27,9 +27,10 @@ loss:
 model:
   threshold: 0.5
   topology_loss:
-    distance_backend: "mahalanobis"
+    distance_backend: "ellphi"
+    ellphi_differentiable: true
     homology_dimensions: [0, 1]
-    prob_weighting: true
+    prob_weighting: false
 
 data:
   batch_size: 4

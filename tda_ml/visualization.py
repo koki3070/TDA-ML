@@ -51,7 +51,7 @@ def visualize(
     title_prefix="",
     sample_indices=None,
     threshold=0.5,
-    backend="mahalanobis",
+    backend="ellphi",
     eps=None,
     min_samples=5,
 ):

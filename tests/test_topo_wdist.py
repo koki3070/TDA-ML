@@ -16,13 +16,13 @@ class TestTopoWdist(unittest.TestCase):
         t = np.linspace(0, 2 * np.pi, n, endpoint=False)
         return np.stack([np.cos(t), np.sin(t)], axis=1).astype(np.float32)
 
-    def test_identical_clouds_near_zero_mahalanobis(self):
+    def test_identical_clouds_near_zero_ellphi(self):
         clean = self._circle(14)
         noisy = clean.copy()
         params = local_pca_ellipse_params(torch.from_numpy(noisy).unsqueeze(0)).squeeze(0).numpy()
         opts = TopoWdistOptions(
             teacher_mode="local_pca",
-            distance_backend="mahalanobis",
+            distance_backend="ellphi",
             homology_dimensions=(0, 1),
             prob_weighting=False,
         )
@@ -38,7 +38,7 @@ class TestTopoWdist(unittest.TestCase):
         params = local_pca_ellipse_params(torch.from_numpy(noisy).unsqueeze(0)).squeeze(0).numpy()
         opts = TopoWdistOptions(
             teacher_mode="local_pca",
-            distance_backend="mahalanobis",
+            distance_backend="ellphi",
             homology_dimensions=(0, 1),
             prob_weighting=False,
         )

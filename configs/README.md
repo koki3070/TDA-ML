@@ -14,7 +14,7 @@ Canonical YAML files live **in this directory** (deep-merged with `base.yaml` by
 | `o20` | `data.num_outliers=20` |
 | `nocls` | `loss.w_class=0` |
 | `h1` | `homology_dimensions=[1]` |
-| `ellphi` / `maha` | `distance_backend` |
+| `ellphi` | training PD `distance_backend` (ellphi only) |
 | `lpca` / `euclid` | `teacher_mode` (`local_pca` / `euclidean`) |
 | `power` | `size_mode=power` |
 
@@ -32,7 +32,7 @@ trailing tokens may truncate, e.g. `paper_h1_ellphi_lpca_pow`). Override with
 | File | Role |
 |------|------|
 | `base.yaml` | Shared defaults; always merged first. Declared keys only (no silent trainer defaults). |
-| `reproduce.yaml` | Secondary backend pipeline comparison (`run_backend_multiseed.py` / CI smoke). |
+| `reproduce.yaml` | Secondary backend pipeline smoke (`run_backend_multiseed.py` / CI). |
 | `dev.yaml` | Small MNIST subset for local wiring (non-paper). |
 | `prod.yaml` | Longer CPU profile (non-paper). |
 | `test_fast.yaml` | Quick checks / CI. |
@@ -43,7 +43,6 @@ trailing tokens may truncate, e.g. `paper_h1_ellphi_lpca_pow`). Override with
 
 | File | Role |
 |------|------|
-| `methods_n100_o20_nocls_h1_maha_euclid_power.yaml` | Euclidean-teacher contrast column (not main table). |
 | `methods_n100_o20_nocls_h1_ellphi_lpca_power_neartangent_barrier.yaml` | Near-tangent + `elongate_barrier` (`T=6.0`). Opt-in via `BASE_CONFIG=...`. |
 
 Never an implicit swap for paper 30ep / ADBSCAN comparison. Barrier matches
@@ -52,8 +51,9 @@ Never an implicit swap for paper 30ep / ADBSCAN comparison. Barrier matches
 ## 置かないもの
 
 Probe / ablation / dated experiment YAML → local `configs/archive/` only
-(gitignored). Do not reintroduce rings / contam / raw_axes configs here unless
-they become a claimed Methods path with a matching public YAML above.
+(gitignored). Do not reintroduce geom-teacher, Mahalanobis training-PD,
+maha+euclid Methods, or rings / contam configs here unless they become a
+claimed Methods path with a matching public YAML above.
 
 Library support without public paper YAML: `tda_ml/ring_dataset.py`
 (`dataset_type=thin_rings`) and `tda_ml/tangent_outliers.py` remain importable
@@ -70,7 +70,7 @@ Missing required keys **hard-fail** (no silent method defaults).
 | `meta` | `config_id` | `main` | Run directory prefix `<config_id>_<timestamp>`. |
 | `model` | `point_dim`, `feature_dim` | `main` | Passed to `AnisotropicOutlierClassifier`. |
 | `model` | `threshold` | `Trainer` | Classification threshold. |
-| `model` | `topology_loss.distance_backend` | `Trainer` | `mahalanobis` or `ellphi` (required). |
+| `model` | `topology_loss.distance_backend` | `Trainer` | Training PD: **`ellphi` only**. |
 | `model` | `topology_loss.homology_dimensions` | `Trainer` / topo W-Dist | Required list. |
 | `model` | `topology_loss.prob_weighting` | `Trainer` | Required bool; `ellphi` requires `false`. |
 | `model` | `topology_loss.ellphi_differentiable` | `Trainer` | Required bool. |
@@ -82,6 +82,7 @@ Missing required keys **hard-fail** (no silent method defaults).
 | `training` | `lr`, `epochs`, `grad_clip_value`, `visualize_every`, `warmup_epochs` | `main` / `Trainer` | |
 | `training` | `selection.metric` | `Trainer` | Required (paper: `val_topo`). |
 | `data` | `seed`, sizes, `outlier_mode`, … | `main` | Explicit geometry; hard-fail if absent. |
+| `evaluation` | `dbscan.backend` | paper eval / MCC | Paper protocol default **`mahalanobis`** (clustering, not PD). |
 | `outputs` | `base_dir` | `main` | Parent of per-run trees. |
 | `reproducibility` | `*` | preflight / trainer | Strict defaults in `base.yaml`. |
 | `init_checkpoint` | | `main` | Optional warm-start. |

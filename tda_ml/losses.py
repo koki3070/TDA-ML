@@ -140,15 +140,15 @@ class TopologicalLoss(nn.Module):
     and must be set explicitly (paper no_cls stack uses ``[1]``).
 
     ``distance_backend``:
-      - ``mahalanobis``: anisotropic distance (optional prob weighting)
       - ``ellphi``: tangency distance via ``ellphi.grad`` when differentiable
+        (only supported training-PD backend)
 
     Degenerate ellphi geometry raises ``RuntimeError`` (no silent axis projection).
     """
     def __init__(
         self,
         weight=0.1,
-        distance_backend: str = "mahalanobis",
+        distance_backend: str = "ellphi",
         ellphi_differentiable: bool = True,
         prob_weighting: bool = False,
         eps_scale: float = 1.0,
@@ -163,14 +163,12 @@ class TopologicalLoss(nn.Module):
         self.weight = weight
         self.distance_backend = distance_backend.lower().strip()
         self.ellphi_differentiable = ellphi_differentiable
-        # When False, outlier-probability weighting of the distance matrix is
-        # disabled (probs=None). Only affects the ``mahalanobis`` backend; ``ellphi``
-        # never uses probs. Useful for a fair backend ablation against ellphi.
+        # Outlier-probability weighting is not implemented for ellphi (PD backend).
+        # Requesting prob_weighting=true hard-fails in compute_distance_matrix_batch.
         self.prob_weighting = bool(prob_weighting)
-        # Filtration-unit alignment between the predicted distance matrix (Mahalanobis
-        # or ellphi tangency units) and the Euclidean clean (teacher) PD. Legacy
-        # ``topo_eps_scale`` (v73 default 0.7022) multiplied D by a scalar; ``ellphi``
-        # tangency distances live on a different scale than Euclidean, so without this
+        # Filtration-unit alignment between the predicted ellphi tangency matrix
+        # and the Euclidean clean (teacher) PD. Legacy ``topo_eps_scale``
+        # (v73 default 0.7022) multiplied D by a scalar; without alignment
         # the topology loss is dominated by scale rather than shape.
         #   - scale_mode="fixed":  D <- D * eps_scale  (scalar; eps_scale=1.0 == no-op)
         #   - scale_mode="median": D <- D * (m_e / median(offdiag D)); m_e required

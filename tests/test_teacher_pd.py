@@ -52,14 +52,15 @@ class TestTeacherMode(unittest.TestCase):
         self.assertIsNotNone(scales)
         self.assertEqual(len(scales), 2)
 
-    def test_local_pca_teacher_mahalanobis(self):
+    def test_local_pca_teacher_ellphi(self):
         vr = VietorisRipsComplex(dim=1)
         clean = torch.randn(2, 20, 2)
         pd_info, scales = compute_clean_teacher_batch(
             clean,
             vr,
             teacher_mode="local_pca",
-            distance_backend="mahalanobis",
+            distance_backend="ellphi",
+            ellphi_differentiable=False,
             local_pca_k=10,
             need_clean_scales=True,
         )
@@ -84,13 +85,14 @@ class TestTeacherMode(unittest.TestCase):
         vr = VietorisRipsComplex(dim=1)
         clean = torch.randn(1, 25, 2)
         pd_eucl, _ = compute_clean_teacher_batch(
-            clean, vr, teacher_mode="euclidean", distance_backend="mahalanobis"
+            clean, vr, teacher_mode="euclidean", distance_backend="ellphi"
         )
         pd_pca, _ = compute_clean_teacher_batch(
             clean,
             vr,
             teacher_mode="local_pca",
-            distance_backend="mahalanobis",
+            distance_backend="ellphi",
+            ellphi_differentiable=False,
             local_pca_k=10,
         )
         # PD objects differ when filtration construction differs

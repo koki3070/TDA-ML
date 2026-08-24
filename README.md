@@ -66,25 +66,19 @@ uv run python experiments/eval_baselines.py \
 Details and contract keys: `REPRODUCIBILITY.md` / `configs/README.md`.
 Generated artifacts stay under `outputs/` (not committed).
 
-## Backend pipeline comparison (secondary / CI)
+## Backend pipeline smoke (secondary / CI)
 
-`experiments/run_backend_multiseed.py` compares **full training pipelines** under
-`configs/reproduce.yaml`. It is **not** the paper main-table entrypoint and
-**not** a pure distance-backend ablation.
+`experiments/run_backend_multiseed.py` is a **secondary** driver for the shared
+`configs/reproduce.yaml` profile. It is **not** the paper main-table entrypoint.
+Training PD filtration is **ellphi only**; paper MCC / DBSCAN still uses
+mahalanobis as a clustering distance.
 
 ```bash
 # CI-style smoke
 uv run python experiments/run_backend_multiseed.py \
   --base-config reproduce \
-  --epochs 1 --seeds 42 --backends mahalanobis \
+  --epochs 1 --seeds 42 --backends ellphi \
   --out-base outputs/smoke
-
-# Full secondary comparison (local / own runner; not CI)
-uv run python experiments/run_backend_multiseed.py \
-  --base-config reproduce \
-  --epochs 50 --seeds 42 123 456 789 1024 \
-  --backends mahalanobis ellphi \
-  --out-base outputs/backend_compare
 ```
 
 Expected under `--out-base`: `progress_summary.csv`, `backend_stats.csv`, and
@@ -98,15 +92,14 @@ treat direct invocation as the public protocol.
 ## Continuous integration
 
 PRs and pushes to `main` / `feature/**` run `ruff`, tests, and the **1-epoch
-mahalanobis smoke** above. Paper 30ep × 5-seed production is not run in CI.
+ellphi smoke** above. Paper 30ep × 5-seed production is not run in CI.
 
 ## Known constraints
 
 - Fixed paper seed set: `42 123 456 789 1024`.
 - Runtime depends on device / threads / dtype; each run records a manifest.
-- For topological loss, **mahalanobis** may use outlier-probability weighting;
-  **ellphi** is geometry-only and requires `prob_weighting=false` (hard-fail
-  otherwise). Do not read backend comparison as an isolated metric swap.
+- Training PD / topo W-Dist: **`ellphi` only** (`prob_weighting=false`).
+- Paper MCC DBSCAN: **`mahalanobis`** clustering distance (not filtration).
 
 ## License / Attribution
 

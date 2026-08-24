@@ -74,7 +74,7 @@ uv run python experiments/eval_paper.py \
 
 主表・チューニングの preflight は `homology_dimensions=[1]`、`teacher_mode=local_pca`、`prob_weighting=false`、`aniso_mode=elongate`、`distance_backend=ellphi`、`size_mode=power`、`w_class=0.0`、`teacher_local_pca_k=10`、`teacher_local_pca_normalize_axes=true` の明示を要求する。欠落や不一致は実行前に hard-fail する。本番 30ep は `--tune-json`（H1-only Optuna best）必須で、YAML 埋め込みの旧重みでは起動しない。
 
-**退化ガード variant（主表外・Methods opt-in）:** near-tangent データでは素の `elongate` が短軸→0 まで潰し、ellphi tangency が hard-fail し得る。対策として `aniso_mode: elongate_barrier`（`PAPER_NO_CLS_BARRIER_CONTRACT`、`aniso_barrier_threshold=6.0`、`distance_backend=ellphi`）を **YAML で明示したときだけ**使う。公開正本: `methods_n100_o20_nocls_h1_ellphi_lpca_power_neartangent_barrier`（`BASE_CONFIG=...`）。Euclidean-teacher 対比列は `methods_n100_o20_nocls_h1_maha_euclid_power`。暗黙の切替はしない。主表の ADBSCAN 比較・本番 30ep 経路には使わない。
+**退化ガード variant（主表外・Methods opt-in）:** near-tangent データでは素の `elongate` が短軸→0 まで潰し、ellphi tangency が hard-fail し得る。対策として `aniso_mode: elongate_barrier`（`PAPER_NO_CLS_BARRIER_CONTRACT`、`aniso_barrier_threshold=6.0`、`distance_backend=ellphi`）を **YAML で明示したときだけ**使う。公開正本: `methods_n100_o20_nocls_h1_ellphi_lpca_power_neartangent_barrier`（`BASE_CONFIG=...`）。暗黙の切替はしない。主表の ADBSCAN 比較・本番 30ep 経路には使わない。
 
 ## 命名移行（2026-07 / PR #7）— 破壊的
 
@@ -177,36 +177,32 @@ opt-in fallback を有効にした場合、`run_manifest.json` の `fallbacks` �
 
 `tda_ml/run_paths.py` が `outputs/supervised` / `outputs/supervised_no_cls` / `outputs/tune` 配下の slug・タイムスタンプ命名を統一します。新規実験フォルダは `scripts/new_experiment.sh` を使用してください。
 
-## 副次: バックエンドパイプライン比較（論文主表ではない）
+## 副次: バックエンド smoke（論文主表ではない）
 
 `run_backend_multiseed.py` は **二次比較 / CI smoke** 用です。論文主表の入口ではありません。
+学習 PD filtration は **ellphi のみ**です。
 
 ```bash
 uv run python experiments/run_backend_multiseed.py \
   --base-config reproduce \
-  --epochs 50 \
-  --seeds 42 123 456 789 1024 \
-  --backends mahalanobis ellphi \
-  --out-base outputs/backend_compare
+  --epochs 1 \
+  --seeds 42 \
+  --backends ellphi \
+  --out-base outputs/ci_smoke
 ```
 
-再開・ロック・期待成果物は `README.md` の Backend pipeline comparison 節を参照。
+再開・ロック・期待成果物は `README.md` の Backend pipeline smoke 節を参照。
 
-### バックエンド比較と outlier 確率の重み（非対称）
+### 学習 PD と DBSCAN の距離は別物
 
-- `run_backend_multiseed.py` のマルチシード・バックエンド比較は、**距離バックエンドだけを切り替えた純粋な ablation ではありません**（学習パイプライン全体の比較です）。
-- 位相損失では **`mahalanobis`** が outlier **確率による重み付け**を距離行列に織り込める一方、**`ellphi`** では未実装のため `prob_weighting=false` を明示する。`true` は黙って無視せず hard-fail する。
-- 結果は **同一スケジュール・同一設定表面**（典型: `configs/reproduce.yaml`）上の **2 本のフルパイプライン**として読み、距離実装だけの効果に還元しないでください。
-
-位相損失用の距離行列は `model.topology_loss.distance_backend` ごとに別定義です。**`mahalanobis`** では、学習で予測した **outlier 確率 `probs`** を距離の重み付けに織り込めます（`tda_ml.topology.compute_anisotropic_distance_matrix`）。**`ellphi`** では楕円の接触距離のみを用い、`run_backend_multiseed.py` が `prob_weighting=false` を明示します。未実装の確率重みを要求すると `tda_ml.distance_backend.compute_distance_matrix_batch` が hard-fail します。
-
-したがって、`run_backend_multiseed.py` で同じ YAML を回しても、**位相損失が見ている距離空間はバックエンド間で同一ではありません**。ここでは「同一のデータ・スケジュール・設定表面での再現パイプライン比較」を意図しており、**両バックエンドが数学的に完全に同型の重み付き距離目的関数を共有する**という読み方はしません。`ellphi` 側に Mahalanobis の確率重みに相当する項を無理に足す予定はなく、比較の解釈は本節および `README.md` の Known constraints に従ってください。
+- **学習 topo loss / 教師 PD / topo W-Dist:** `distance_backend=ellphi` のみ。`mahalanobis` を要求すると hard-fail。
+- **MCC のチューニング objective と paper eval の DBSCAN:** `mahalanobis`（点間クラスタリング距離。filtration 時刻ではない）。
 
 ### ellphi + power：二目的チューニング（実験メモ）
 
 no_cls・local_pca 教師・`size_mode=power` スタックでは、`tune_objectives.sh` が **W-Dist 最小**と **DBSCAN MCC 最大**の 2 本の Optuna study を実行し、`run_paper_30ep_multiseed.sh` が固定した best 重みで 30ep 本番を実行します。
 
-要点: **学習 topo loss と教師 PD は ellphi**；**MCC のチューニング objective と paper eval の DBSCAN は mahalanobis**（filtration 時刻をクラスタリング距離に使わない）。
+要点: **学習 topo loss と教師 PD は ellphi**；**MCC のチューニング objective と paper eval の DBSCAN は mahalanobis**。
 
 **重み固定プロトコル（重要）:** ハイパーパラメータ探索（Optuna）は **seed 42 の 20ep proxy で 1 回だけ**行い、得られた best 重み（`w_topo` / `w_aniso` / `w_size` / `lr`）を **5 つのデータ seed（42/123/456/789/1024）すべての 30ep 本番に固定**して適用します。**データ seed ごとの再チューニングは行いません。** 論文の mean ± std はこの固定重みの下でのデータ seed 間ばらつきです。
 
@@ -279,7 +275,7 @@ uv run pytest
 ```
 
 PR および **`main` と `feature/**` への push** のたびに、CI では **ruff**、テスト、軽量な
-**backend smoke**（`run_backend_multiseed.py` を `--epochs 1`・1 seed・`mahalanobis`）が走ります。
+**backend smoke**（`run_backend_multiseed.py` を `--epochs 1`・1 seed・`ellphi`）が走ります。
 **論文本番（30ep × 5 seed）は CI では実行しません。**
 
 ## 論文提出時のスナップショット

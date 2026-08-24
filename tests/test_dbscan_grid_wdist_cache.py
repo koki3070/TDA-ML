@@ -28,7 +28,7 @@ class TestDbscanGridWdistCache(unittest.TestCase):
         clouds = [_toy_cloud(), _toy_cloud()]
         opts = TopoWdistOptions(
             teacher_mode="euclidean",
-            distance_backend="mahalanobis",
+            distance_backend="ellphi",
             homology_dimensions=(0, 1),
             prob_weighting=False,
         )
@@ -49,7 +49,7 @@ class TestDbscanGridWdistCache(unittest.TestCase):
         cloud = _toy_cloud()
         opts = TopoWdistOptions(
             teacher_mode="euclidean",
-            distance_backend="mahalanobis",
+            distance_backend="ellphi",
             homology_dimensions=(0, 1),
             prob_weighting=False,
         )

@@ -1,23 +1,26 @@
-"""Regression tests for training.topo_distance_mode (mahalanobis vs ellphi)."""
+"""Regression tests for training topo distance (ellphi-only PD filtration)."""
 
 import unittest
+
 import torch
 
 from tda_ml.dbscan import compute_anisotropic_distance_matrix_np
 from tda_ml.distance_backend import (
     DISTANCE_MODE_ELLPHI,
-    DISTANCE_MODE_MAHALANOBIS,
     compute_distance_matrix_batch,
     compute_topo_distance_matrix,
-    mahalanobis_distance_matrix_batched,
     normalize_topo_distance_mode,
 )
 
 
 class TestTopoDistanceMode(unittest.TestCase):
-    def test_normalize_aliases(self):
-        self.assertEqual(normalize_topo_distance_mode("Mahalanobis"), DISTANCE_MODE_MAHALANOBIS)
+    def test_normalize_ellphi(self):
         self.assertEqual(normalize_topo_distance_mode("ellphi"), DISTANCE_MODE_ELLPHI)
+        self.assertEqual(normalize_topo_distance_mode("Ellphi"), DISTANCE_MODE_ELLPHI)
+
+    def test_normalize_mahalanobis_hard_fails(self):
+        with self.assertRaisesRegex(ValueError, "not supported for training PD"):
+            normalize_topo_distance_mode("mahalanobis")
 
     def test_ellphi_probability_weighting_hard_fails(self):
         points = torch.zeros(1, 3, 2)
@@ -44,13 +47,13 @@ class TestTopoDistanceMode(unittest.TestCase):
                 backend="ellphi",
             )
 
-    def test_mahalanobis_shape(self):
+    def test_ellphi_shape(self):
         torch.manual_seed(0)
         b, n = 2, 9
         pt = torch.randn(b, n, 2)
         par = torch.randn(b, n, 3)
         par[:, :, 0:2] = par[:, :, 0:2].abs() + 0.1
-        d = compute_topo_distance_matrix(pt, par, distance_mode="mahalanobis")
+        d = compute_topo_distance_matrix(pt, par, distance_mode="ellphi")
         self.assertEqual(d.shape, (b, n, n))
 
     def test_ellphi_finite_and_grad(self):
@@ -61,15 +64,12 @@ class TestTopoDistanceMode(unittest.TestCase):
         par[:, :, 0:2] = par[:, :, 0:2].abs() + 0.15
         par.requires_grad_(True)
         d_e = compute_topo_distance_matrix(pt, par, distance_mode="ellphi", ellphi_backend="auto")
-        d_m = mahalanobis_distance_matrix_batched(pt, par)
         self.assertEqual(d_e.shape, (b, n, n))
         self.assertTrue(torch.isfinite(d_e).all())
         loss = d_e.sum()
         loss.backward()
         self.assertIsNotNone(pt.grad)
         self.assertIsNotNone(par.grad)
-        # Forward definitions differ; should not be identical in general
-        self.assertGreater((d_e - d_m).abs().mean().item(), 1e-6)
 
     def test_normalize_invalid_mode_raises_value_error(self):
         with self.assertRaises(ValueError):
@@ -90,22 +90,35 @@ class TestTopoEpsScale(unittest.TestCase):
 
     def _clean_pd(self, pt):
         from torch_topological.nn import VietorisRipsComplex
+
         vr = VietorisRipsComplex(dim=1)
         return [vr(pt[i]) for i in range(pt.shape[0])]
 
     def test_invalid_scale_mode_raises(self):
         from tda_ml.losses import TopologicalLoss
+
         with self.assertRaises(ValueError):
             TopologicalLoss(scale_mode="bogus", homology_dimensions=[0, 1])
 
     def test_eps_scale_default_is_noop(self):
         """eps_scale=1.0 (fixed) must not change the loss vs. an explicit 1.0."""
         from tda_ml.losses import TopologicalLoss
+
         pt, par, logits = self._inputs()
         clean = self._clean_pd(pt)
-        base = TopologicalLoss(weight=1.0, distance_backend="mahalanobis", prob_weighting=False, homology_dimensions=[0, 1])
-        same = TopologicalLoss(weight=1.0, distance_backend="mahalanobis",
-                               prob_weighting=False, eps_scale=1.0, homology_dimensions=[0, 1])
+        base = TopologicalLoss(
+            weight=1.0,
+            distance_backend="ellphi",
+            prob_weighting=False,
+            homology_dimensions=[0, 1],
+        )
+        same = TopologicalLoss(
+            weight=1.0,
+            distance_backend="ellphi",
+            prob_weighting=False,
+            eps_scale=1.0,
+            homology_dimensions=[0, 1],
+        )
         l0 = base(pt, par, logits, clean).item()
         l1 = same(pt, par, logits, clean).item()
         self.assertAlmostEqual(l0, l1, places=6)
@@ -113,23 +126,39 @@ class TestTopoEpsScale(unittest.TestCase):
     def test_eps_scale_changes_loss(self):
         """A non-unit eps_scale rescales the predicted filtration and changes the loss."""
         from tda_ml.losses import TopologicalLoss
+
         pt, par, logits = self._inputs()
         clean = self._clean_pd(pt)
-        base = TopologicalLoss(weight=1.0, distance_backend="mahalanobis", prob_weighting=False, homology_dimensions=[0, 1])
-        scaled = TopologicalLoss(weight=1.0, distance_backend="mahalanobis",
-                                 prob_weighting=False, eps_scale=0.3, homology_dimensions=[0, 1])
+        base = TopologicalLoss(
+            weight=1.0,
+            distance_backend="ellphi",
+            prob_weighting=False,
+            homology_dimensions=[0, 1],
+        )
+        scaled = TopologicalLoss(
+            weight=1.0,
+            distance_backend="ellphi",
+            prob_weighting=False,
+            eps_scale=0.3,
+            homology_dimensions=[0, 1],
+        )
         l0 = base(pt, par, logits, clean).item()
         ls = scaled(pt, par, logits, clean).item()
         self.assertGreater(abs(l0 - ls), 1e-6)
 
     def test_median_mode_runs_and_grads(self):
         from tda_ml.losses import TopologicalLoss
+
         pt, par, logits = self._inputs()
         par = par.clone().requires_grad_(True)
         clean = self._clean_pd(pt)
-        loss_fn = TopologicalLoss(weight=1.0, distance_backend="mahalanobis",
-                                  prob_weighting=False, scale_mode="median", homology_dimensions=[0, 1])
-        # clean_scales (m_e) provided by the trainer; loss brings prediction onto it.
+        loss_fn = TopologicalLoss(
+            weight=1.0,
+            distance_backend="ellphi",
+            prob_weighting=False,
+            scale_mode="median",
+            homology_dimensions=[0, 1],
+        )
         clean_scales = [float(torch.pdist(pt[i]).median()) for i in range(pt.shape[0])]
         loss = loss_fn(pt, par, logits, clean, clean_scales=clean_scales)
         self.assertTrue(torch.isfinite(loss))
@@ -137,45 +166,52 @@ class TestTopoEpsScale(unittest.TestCase):
         self.assertIsNotNone(par.grad)
 
     def test_median_aligns_prediction_to_teacher_scale(self):
-        """median mode must rescale the prediction so its median matches m_e,
-        leaving the teacher untouched."""
+        """median mode must rescale the prediction so its median matches m_e."""
         from tda_ml.losses import TopologicalLoss
+
         pt, par, logits = self._inputs()
-        loss_fn = TopologicalLoss(weight=1.0, distance_backend="mahalanobis",
-                                  prob_weighting=False, scale_mode="median", homology_dimensions=[0, 1])
+        loss_fn = TopologicalLoss(
+            weight=1.0,
+            distance_backend="ellphi",
+            prob_weighting=False,
+            scale_mode="median",
+            homology_dimensions=[0, 1],
+        )
         i = 0
-        from tda_ml.distance_backend import compute_distance_matrix_batch
-        D = compute_distance_matrix_batch(pt, par, probs=None, symmetrize="max",
-                                          backend="mahalanobis")
+        D = compute_distance_matrix_batch(
+            pt, par, probs=None, symmetrize="max", backend="ellphi"
+        )
         m_e = float(torch.pdist(pt[i]).median())
         rescaled = loss_fn._rescale_distance_matrix(D[i], clean_scale=m_e)
         off = rescaled[rescaled > 0]
-        # After alignment the predicted median equals the teacher Euclidean median.
         self.assertAlmostEqual(float(off.median()), m_e, places=4)
 
-    def test_mahalanobis_extreme_params_remain_finite(self):
-        """極小/極大軸長でも距離行列が非有限値にならないことを確認。"""
-        b, n = 1, 5
+    def test_ellphi_degenerate_extreme_params_hard_fail(self):
+        """極小/極大軸で ellphi が NaN になる場合は黙って有限値にせず hard-fail。"""
         pt = torch.tensor(
             [[[1e-9, -1e-9], [1.0, 2.0], [3.0, -1.0], [0.5, 0.1], [-2.0, 1.5]]],
             dtype=torch.float64,
         )
         par = torch.tensor(
-            [[[1e-8, 1e8, 0.0],
-              [2e-8, 5e7, 0.3],
-              [1e7, 2e-7, -0.4],
-              [5e-8, 8e7, 0.7],
-              [2e7, 3e-8, -1.0]]],
+            [
+                [
+                    [1e-8, 1e8, 0.0],
+                    [2e-8, 5e7, 0.3],
+                    [1e7, 2e-7, -0.4],
+                    [5e-8, 8e7, 0.7],
+                    [2e7, 3e-8, -1.0],
+                ]
+            ],
             dtype=torch.float64,
         )
-        d = compute_topo_distance_matrix(pt, par, distance_mode="mahalanobis")
-        self.assertEqual(d.shape, (b, n, n))
-        self.assertTrue(torch.isfinite(d).all())
+        with self.assertRaisesRegex(RuntimeError, "degenerate ellipse|NaN"):
+            compute_topo_distance_matrix(pt, par, distance_mode="ellphi")
 
 
 class TestTopoSubsampling(unittest.TestCase):
     def test_topo_max_points_subsamples(self):
         from tda_ml.losses import TopologicalLoss
+
         torch.manual_seed(0)
         b, n = 1, 20
         pt = torch.randn(b, n, 2)
@@ -183,11 +219,12 @@ class TestTopoSubsampling(unittest.TestCase):
         par[:, :, 0:2] = par[:, :, 0:2].abs() + 0.2
         logits = torch.zeros(b, n, 1)
         from torch_topological.nn import VietorisRipsComplex
+
         vr = VietorisRipsComplex(dim=1)
         clean = [vr(pt[0, :12])]
         loss_fn = TopologicalLoss(
             weight=1.0,
-            distance_backend="mahalanobis",
+            distance_backend="ellphi",
             prob_weighting=False,
             max_points=12,
             homology_dimensions=[0, 1],

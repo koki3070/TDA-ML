@@ -329,8 +329,8 @@ def parse_args() -> argparse.Namespace:
         "--backends",
         type=str,
         nargs="+",
-        default=["mahalanobis", "ellphi"],
-        choices=["mahalanobis", "ellphi"],
+        default=["ellphi"],
+        choices=["ellphi"],
     )
     p.add_argument(
         "--out-base",

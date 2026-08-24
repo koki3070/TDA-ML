@@ -82,7 +82,7 @@ def main(config_name=None, config=None, trial=None, config_overrides=None):
         if "distance_backend" not in topo_cfg:
             raise ValueError(
                 "model.topology_loss.distance_backend must be set before manifest write; "
-                "refusing silent mahalanobis default"
+                "refusing silent default (training PD requires ellphi)"
             )
         selection = (config.get("training", {}).get("selection") or {})
         if "metric" not in selection:

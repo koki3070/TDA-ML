@@ -83,7 +83,7 @@ class TestRunBackendMultiseed(unittest.TestCase):
         header = rbm.PROGRESS_HEADER
         rows = [
             {
-                "backend": "mahalanobis",
+                "backend": "ellphi",
                 "seed": "1",
                 "epochs": "50",
                 "run_dir": "/tmp/a",
@@ -95,7 +95,7 @@ class TestRunBackendMultiseed(unittest.TestCase):
                 "final_val_loss": "0",
             },
             {
-                "backend": "mahalanobis",
+                "backend": "ellphi",
                 "seed": "2",
                 "epochs": "50",
                 "run_dir": "/tmp/b",
@@ -118,8 +118,8 @@ class TestRunBackendMultiseed(unittest.TestCase):
             with stats.open(newline="") as f:
                 out = list(csv.reader(f))
             self.assertEqual(out[0][0], "backend")
-            # mahalanobis, n=2, mean best=1, std_best=sqrt(2), mean final=1, std_final=sqrt(2)
-            self.assertEqual(out[1][0], "mahalanobis")
+            # ellphi, n=2, mean best=1, std_best=sqrt(2), mean final=1, std_final=sqrt(2)
+            self.assertEqual(out[1][0], "ellphi")
             self.assertEqual(out[1][1], "2")
             self.assertAlmostEqual(float(out[1][2]), 1.0)
             self.assertAlmostEqual(float(out[1][3]), 2**0.5)

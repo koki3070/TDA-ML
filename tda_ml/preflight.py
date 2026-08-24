@@ -252,8 +252,12 @@ def preflight_training_config(
         )
 
     backend = str(topo["distance_backend"]).lower().strip()
-    if backend not in ("mahalanobis", "ellphi"):
-        raise ValueError(f"Unknown distance_backend {backend!r}")
+    if backend != "ellphi":
+        raise ValueError(
+            f"Training PD distance_backend must be 'ellphi' (got {backend!r}). "
+            "Mahalanobis is reserved for DBSCAN clustering "
+            "(evaluation.dbscan.backend / --dbscan-backend), not topo filtration."
+        )
     homology_dimensions = list(normalize_homology_dimensions(topo["homology_dimensions"]))
     prob_weighting = bool(topo["prob_weighting"])
     teacher_mode = str(

@@ -215,7 +215,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--backend",
         default="ellphi",
-        choices=["ellphi", "mahalanobis"],
+        choices=["ellphi"],
         help="Training topo-loss distance backend (ellphi = ellipse tangency filtration).",
     )
     p.add_argument(
