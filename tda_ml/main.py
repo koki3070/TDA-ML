@@ -3,6 +3,7 @@ import csv
 import json
 import logging
 import os
+from pathlib import Path
 
 import torch
 
@@ -21,10 +22,11 @@ from tda_ml.run_setup import (
 )
 from tda_ml.run_paths import build_run_dir
 from tda_ml.runtime_profile import build_runtime_profile
-from tda_ml.seed_utils import set_global_seed
+from tda_ml.seed_utils import resolve_model_seed, set_global_seed
 from tda_ml.preflight import preflight_training_config
 from tda_ml.reproducibility import (
     RUN_STATUS_COMPLETED,
+    RUN_STATUS_EMPTY_RESULT,
     RUN_STATUS_FAILED,
     RUN_STATUS_NOT_RUN,
     RUN_STATUS_RUNNING,
@@ -38,6 +40,15 @@ from tda_ml.supervised_diagnostics import (
     write_abort_report,
 )
 from tda_ml.trainer import Trainer
+from tda_ml.val_topo_cliff import (
+    ValTopoCliffError,
+    assert_val_topo_cliff,
+    best_val_topo_from_history,
+    cliff_deadline_epoch_from_config,
+    cliff_max_from_config,
+    maybe_raise_cliff_deadline,
+    write_cliff_report,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +89,7 @@ def main(config_name=None, config=None, trial=None, config_overrides=None):
         if "seed" not in data_cfg:
             raise ValueError("data.seed must be set explicitly; refusing silent seed=42")
         seed = int(data_cfg["seed"])
+        model_seed = resolve_model_seed(config)
         topo_cfg = (config.get("model") or {}).get("topology_loss") or {}
         if "distance_backend" not in topo_cfg:
             raise ValueError(
@@ -106,7 +118,13 @@ def main(config_name=None, config=None, trial=None, config_overrides=None):
         if dataset_type == "thin_rings":
             from tda_ml.ring_dataset import ring_kwargs_from_config
 
-            outlier_mode = "ring_radial"
+            if "outlier_mode" not in data_cfg:
+                raise ValueError(
+                    "data.outlier_mode must be set explicitly for thin_rings "
+                    "(ring_radial|ring_bridge); refusing silent ring_radial default "
+                    "in run manifest"
+                )
+            outlier_mode = str(data_cfg["outlier_mode"]).strip().lower()
             data_outliers = {
                 "dataset_type": dataset_type,
                 "outlier_mode": outlier_mode,
@@ -156,11 +174,20 @@ def main(config_name=None, config=None, trial=None, config_overrides=None):
             "run_stamp": run_stamp,
             "command_entry": "tda_ml.main",
             "seed": seed,
+            "model_seed": model_seed,
             "epochs_planned": config["training"]["epochs"],
             "distance_backend": str(topo_cfg["distance_backend"]).lower().strip(),
             "data_outliers": data_outliers,
             "checkpoint_selection": selection["metric"],
             "early_abort": config.get("training", {}).get("early_abort"),
+            "ellipse_orientation_lock": {
+                "freeze_ellipse_angle": bool(
+                    (config.get("model") or {}).get("freeze_ellipse_angle", False)
+                ),
+                "enforce_a_ge_b": bool(
+                    (config.get("model") or {}).get("enforce_a_ge_b", False)
+                ),
+            },
             "run_dir": run_dir,
             "run_status": "pending",
             "final_status": "pending",
@@ -215,12 +242,15 @@ def main(config_name=None, config=None, trial=None, config_overrides=None):
     try:
         data_cfg = config["data"]
         seed = int(data_cfg["seed"])
+        model_seed = resolve_model_seed(config)
         deterministic_algorithms = bool(
             config.get("reproducibility", {}).get("deterministic_algorithms", False)
         )
+        # Dataset sampling uses ``seed`` explicitly via noise_seed; global RNG is
+        # then reset to ``model_seed`` so init/training retries do not retarget data.
         set_global_seed(seed, deterministic_algorithms=deterministic_algorithms)
         logger.info(
-            "Global seed initialized: seed=%s, deterministic_algorithms=%s",
+            "Data seed initialized: seed=%s, deterministic_algorithms=%s",
             seed,
             deterministic_algorithms,
         )
@@ -238,6 +268,8 @@ def main(config_name=None, config=None, trial=None, config_overrides=None):
             config, seed, loader_settings
         )
 
+        set_global_seed(model_seed, deterministic_algorithms=deterministic_algorithms)
+        logger.info("Model/init seed initialized: model_seed=%s", model_seed)
         model = AnisotropicOutlierClassifier(**model_kwargs_from_config(config))
         model.to(device)
 
@@ -346,6 +378,35 @@ def main(config_name=None, config=None, trial=None, config_overrides=None):
                 "val_topo_loss": float(val_topo_loss),
             }
         )
+
+        cliff_max_live = cliff_max_from_config(config)
+        if cliff_max_live is not None:
+            best_so_far = best_val_topo_from_history(metrics_history)
+            try:
+                maybe_raise_cliff_deadline(
+                    epoch=epoch,
+                    best_val_topo=best_so_far,
+                    cliff_max=cliff_max_live,
+                    deadline_epoch=cliff_deadline_epoch_from_config(config),
+                    context=f"run_dir={run_dir}",
+                )
+            except ValTopoCliffError as exc:
+                cliff_report = {
+                    "best_val_topo_loss": best_so_far,
+                    "val_topo_cliff_max": cliff_max_live,
+                    "val_topo_cliff_passed": False,
+                    "epochs": int(epoch),
+                    "deadline_abort": True,
+                }
+                cliff_path = write_cliff_report(Path(run_dir), cliff_report)
+                manifest["val_topo_cliff"] = cliff_report
+                manifest["val_topo_cliff_report"] = str(cliff_path)
+                manifest["final_status"] = RUN_STATUS_EMPTY_RESULT
+                manifest["run_status"] = RUN_STATUS_EMPTY_RESULT
+                manifest["status_reason"] = str(exc)
+                with open(manifest_path, "w", encoding="utf-8") as f:
+                    json.dump(manifest, f, ensure_ascii=True, indent=2)
+                raise
 
         # Track best threshold MCC for early-abort diagnostics (independent of
         # the checkpoint-selection metric).
@@ -473,6 +534,31 @@ def main(config_name=None, config=None, trial=None, config_overrides=None):
             break
 
     if final_status == "completed":
+        cliff_max = cliff_max_from_config(config)
+        if cliff_max is not None:
+            best_val_topo = best_val_topo_from_history(metrics_history)
+            cliff_report = {
+                "best_val_topo_loss": best_val_topo,
+                "val_topo_cliff_max": cliff_max,
+                "val_topo_cliff_passed": best_val_topo <= cliff_max,
+                "epochs": int(epochs),
+            }
+            cliff_path = write_cliff_report(Path(run_dir), cliff_report)
+            manifest["val_topo_cliff"] = cliff_report
+            manifest["val_topo_cliff_report"] = str(cliff_path)
+            try:
+                assert_val_topo_cliff(
+                    best_val_topo,
+                    cliff_max=cliff_max,
+                    context=f"run_dir={run_dir}",
+                )
+            except ValTopoCliffError as exc:
+                manifest["final_status"] = RUN_STATUS_EMPTY_RESULT
+                manifest["run_status"] = RUN_STATUS_EMPTY_RESULT
+                manifest["status_reason"] = str(exc)
+                with open(manifest_path, "w", encoding="utf-8") as f:
+                    json.dump(manifest, f, ensure_ascii=True, indent=2)
+                raise
         manifest["final_status"] = "completed"
         manifest["run_status"] = RUN_STATUS_COMPLETED
         if config.get("_manifest", {}).get("fallbacks"):

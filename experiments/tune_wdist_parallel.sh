@@ -21,21 +21,26 @@ N_WORKERS="${1:-4}"
 N_TRIALS="${2:-24}"
 TUNE_EPOCHS="${3:-20}"
 BACKEND="${4:-ellphi}"
-BASE_CONFIG="${BASE_CONFIG:-tune_mnist_h1}"
+BASE_CONFIG="${BASE_CONFIG:-tune_rings}"
 OUT_BASE="${OUT_BASE:-outputs/tune/wdist}"
-STUDY_NAME="${STUDY_NAME:-tune_wdist_${BACKEND}}"
+STUDY_NAME="${STUDY_NAME:-tune_wdist_rings_${BACKEND}}"
 STORAGE="sqlite:///${OUT_BASE}/study.db"
 THREADS_PER_WORKER="${THREADS_PER_WORKER:-12}"
 TRIALS_PER_WORKER="${TRIALS_PER_WORKER:-${N_TRIALS}}"
 
 mkdir -p "${OUT_BASE}"
 cat > "${OUT_BASE}/PURPOSE.md" <<EOF
-# local_pca + power size W-Dist tune (topo=${BACKEND})
+# H0+H1 + near-tangent + elongate_barrier W-Dist tune (topo=${BACKEND})
 
-Stack: local_pca teacher, \`size_mode=power\`.
-Train topo-loss backend: ${BACKEND} (ellipse tangency filtration).
-Train ckpt: val_topo. Trial objective: mean val **topo W-Dist** (learned ellipses vs teacher PD).
-Search: w_topo, w_aniso, w_size, lr (narrow; same bands as MCC power tune).
+Stack: local_pca teacher, \`size_mode=power\`, \`homology_dimensions=[0, 1]\`,
+\`outlier_mode=local_pca_tangent\` (jitter ±30°, clearance 0.08),
+\`teacher_local_pca_major_scale=0.4\`, \`aniso_mode=elongate_barrier\`
+(\`aniso_barrier_threshold=6.0\`).
+Train ckpt: val_topo. Objective: mean val **topo W-Dist**.
+
+Search constraint (declared method, not a silent filter): narrow band
+\`w_topo∈[0.008,0.045]\`, \`w_aniso∈[0.05,0.15]\`,
+\`w_size∈[0.10,0.40]\`, \`lr∈[1.2e-4,3.0e-4]\`.
 
 Launch: \`bash experiments/tune_wdist_parallel.sh ${N_WORKERS} ${N_TRIALS} ${TUNE_EPOCHS} ${BACKEND}\`
 EOF

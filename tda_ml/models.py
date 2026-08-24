@@ -110,9 +110,24 @@ class AnisotropicOutlierClassifier(nn.Module):
     ``ellipse_param_dim`` must be ``3`` (``[a, b, theta]`` per point). Five-dimensional
     ellipse outputs are not implemented in this PR.
 
+    Ablation locks (default off = production behaviour):
+    - ``freeze_ellipse_angle``: use ``θ = θ_base`` (no residual). Keeps the major-axis
+      *candidate* direction on the local-PCA tangent when combined with ``enforce_a_ge_b``.
+    - ``enforce_a_ge_b``: if ``a < b``, swap so ``a ≥ b``. With ``θ ≈ θ_base`` this
+      prevents the size/elongate dynamics from flipping the geometric major onto the
+      normal (see rings PH-off diagnosis). Declared opt-in only; recorded in the run
+      manifest via ``model_kwargs_from_config``.
+
     ``forward`` returns ellipse parameters with shape ``(B, N, ellipse_param_dim)``.
     """
-    def __init__(self, point_dim=2, feature_dim=128, ellipse_param_dim: int = 3):
+    def __init__(
+        self,
+        point_dim=2,
+        feature_dim=128,
+        ellipse_param_dim: int = 3,
+        freeze_ellipse_angle: bool = False,
+        enforce_a_ge_b: bool = False,
+    ):
         super().__init__()
         if ellipse_param_dim != 3:
             raise ValueError(
@@ -120,6 +135,8 @@ class AnisotropicOutlierClassifier(nn.Module):
                 f"got ellipse_param_dim={ellipse_param_dim}. Five-dimensional outputs are not implemented."
             )
         self.ellipse_param_dim = ellipse_param_dim
+        self.freeze_ellipse_angle = bool(freeze_ellipse_angle)
+        self.enforce_a_ge_b = bool(enforce_a_ge_b)
 
         self.encoder = DecoupledGeometricEncoder(in_dim=point_dim, local_dim=64, k=10)
         
@@ -147,8 +164,15 @@ class AnisotropicOutlierClassifier(nn.Module):
 
         axes_scale = torch.exp(raw[:, :, 0:2])
         axes = axes_scale * base_axes
-        angle_delta = torch.tanh(raw[:, :, 2:3]) * (torch.pi / 2)
-        angle = base_angle + angle_delta
+        if self.enforce_a_ge_b:
+            a = axes[:, :, 0:1]
+            b = axes[:, :, 1:2]
+            axes = torch.cat([torch.maximum(a, b), torch.minimum(a, b)], dim=2)
+        if self.freeze_ellipse_angle:
+            angle = base_angle
+        else:
+            angle_delta = torch.tanh(raw[:, :, 2:3]) * (torch.pi / 2)
+            angle = base_angle + angle_delta
         ellipse_params = torch.cat([axes, angle], dim=2)
 
         return outlier_logits, ellipse_params

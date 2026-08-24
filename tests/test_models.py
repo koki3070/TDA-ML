@@ -46,5 +46,23 @@ class TestAnisotropicOutlierClassifier(unittest.TestCase):
             _, params = model(x)
         torch.testing.assert_close(params[:, :, 0:2], expected_axes)
 
+    def test_freeze_ellipse_angle_uses_base(self):
+        torch.manual_seed(11)
+        model = AnisotropicOutlierClassifier(freeze_ellipse_angle=True)
+        x = torch.rand(1, 16, 2)
+        with torch.no_grad():
+            _, _, base_angle, _ = model.encoder(x)
+            _, params = model(x)
+        torch.testing.assert_close(params[:, :, 2:3], base_angle)
+
+    def test_enforce_a_ge_b(self):
+        torch.manual_seed(13)
+        model = AnisotropicOutlierClassifier(enforce_a_ge_b=True)
+        x = torch.rand(1, 16, 2)
+        with torch.no_grad():
+            _, params = model(x)
+        self.assertTrue((params[:, :, 0] >= params[:, :, 1]).all())
+
+
 if __name__ == '__main__':
     unittest.main()

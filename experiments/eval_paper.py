@@ -9,7 +9,7 @@ Usage::
 
     uv run python experiments/eval_paper.py \\
         --run-dir outputs/supervised/.../paper_s42_<stamp> \\
-        --base-config paper_mnist_h1 \\
+        --base-config paper_rings \\
         --split val
 
     uv run python experiments/eval_paper.py \\
@@ -430,6 +430,7 @@ def load_run_config(run_dir: Path, base_config: str, seed: int | None) -> dict[s
                     "w_class",
                     "teacher_local_pca_k",
                     "teacher_local_pca_normalize_axes",
+                    "teacher_local_pca_major_scale",
                 )
                 if key in contract
             }
@@ -456,7 +457,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--base-config",
         type=str,
-        default="paper_mnist_h1",
+        default="paper_rings",
         help="YAML used when run_manifest lacks method overrides (paper no_cls default).",
     )
     p.add_argument("--split", choices=["val", "test"], required=True)

@@ -10,7 +10,7 @@ import torch
 
 from tda_ml.checkpoint_io import resolve_val_topo_checkpoint
 from tda_ml.config import load_config
-from tda_ml.preflight import assert_paper_no_cls_contract, preflight_paper_eval_run_dir
+from tda_ml.preflight import preflight_paper_eval_run_dir
 from tda_ml.reproducibility import build_reproducibility_manifest_fields
 
 
@@ -24,7 +24,7 @@ class TestPaperEvalImports(unittest.TestCase):
         self.assertTrue(callable(protocol.build_split_loader))
 
     def test_train_and_eval_share_data_root(self):
-        """Training and paper eval must not disagree on MNIST cache path (cwd-independent)."""
+        """Training and paper eval must agree on data root (cwd-independent)."""
         from tda_ml.config import default_data_root
         from tda_ml.run_setup import default_data_root as train_data_root
 
@@ -35,12 +35,18 @@ class TestPaperEvalImports(unittest.TestCase):
         self.assertEqual(default_data_root().name, "data")
 
     def test_public_paper_configs_pass_contract(self):
-        assert_paper_no_cls_contract(
-            load_config("paper_mnist_h1")
+        from tda_ml.preflight import (
+            assert_paper_no_cls_contract,
+            assert_rings_no_cls_contract,
         )
-        assert_paper_no_cls_contract(
-            load_config("tune_mnist_h1")
+
+        assert_rings_no_cls_contract(
+            load_config("paper_rings")
         )
+        assert_rings_no_cls_contract(
+            load_config("tune_rings")
+        )
+        # MNIST Methods near-tangent (H1) — not the rings main table.
         assert_paper_no_cls_contract(
             load_config(
                 "methods_mnist_neartangent"
@@ -59,7 +65,7 @@ class TestPaperEvalImports(unittest.TestCase):
                 resolve_val_topo_checkpoint(run_dir)
 
     def test_manifest_records_zero_pad_constant(self):
-        cfg = load_config("paper_mnist_h1")
+        cfg = load_config("paper_rings")
         fields = build_reproducibility_manifest_fields(cfg)
         self.assertIn("ZERO_PAD_ABS_SUM", fields["numerical_constants"])
 

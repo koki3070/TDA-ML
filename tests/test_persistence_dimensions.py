@@ -80,6 +80,7 @@ class TestPersistenceDimensions(unittest.TestCase):
                 "teacher_mode": "local_pca",
                 "teacher_local_pca_k": 10,
                 "teacher_local_pca_normalize_axes": True,
+                "teacher_local_pca_major_scale": 0.4,
                 "topo_eps_scale": 1.0,
                 "topo_scale_mode": "fixed",
             },
@@ -88,6 +89,7 @@ class TestPersistenceDimensions(unittest.TestCase):
         self.assertEqual(opts.homology_dimensions, (1,))
         self.assertEqual(opts.teacher_mode, "local_pca")
         self.assertFalse(opts.prob_weighting)
+        self.assertEqual(opts.teacher_local_pca_major_scale, 0.4)
 
     def test_topo_wdist_options_hard_fail_on_missing_method_fields(self):
         base = {
@@ -102,6 +104,7 @@ class TestPersistenceDimensions(unittest.TestCase):
                 "teacher_mode": "local_pca",
                 "teacher_local_pca_k": 10,
                 "teacher_local_pca_normalize_axes": True,
+                "teacher_local_pca_major_scale": 0.4,
                 "topo_eps_scale": 1.0,
                 "topo_scale_mode": "fixed",
             },
@@ -111,6 +114,7 @@ class TestPersistenceDimensions(unittest.TestCase):
             "topo_scale_mode",
             "teacher_local_pca_k",
             "teacher_local_pca_normalize_axes",
+            "teacher_local_pca_major_scale",
         ):
             cfg = {
                 "model": {"topology_loss": dict(base["model"]["topology_loss"])},

@@ -6,26 +6,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-from tda_ml.dbscan import apply_anisotropic_dbscan, compute_anisotropic_distance_matrix_np
 from tda_ml.run_paths import visualization_filename
 
 INLIER_COLOR = "tab:blue"
 OUTLIER_COLOR = "tab:red"
-
-
-def _auto_eps(points_np, params_np, backend, quantile=0.3):
-    """Visualization-time eps heuristic: a quantile of positive anisotropic distances.
-
-    Declared heuristic so the DBSCAN panel stays informative regardless of the
-    (possibly collapsed) absolute ellipse scale. Not used for any reported metric.
-    """
-    dm = compute_anisotropic_distance_matrix_np(
-        points_np, params_np, metric="max", probs=None, backend=backend
-    )
-    off = dm[dm > 0]
-    if off.size == 0:
-        return None
-    return float(np.quantile(off, quantile))
 
 
 def _draw_ellipses(ax, points_np, params_np, gt_labels):
@@ -55,19 +39,20 @@ def visualize(
     eps=None,
     min_samples=5,
 ):
-    """Per sample cloud, draw a row of 3 panels.
+    """Per sample cloud, draw a row of 2 panels.
 
     col 0  GT Labels             : points colored by ground-truth (inlier/outlier).
     col 1  GT + learned ellipses : same GT points, each point's learned ellipse drawn
                                    at true scale and colored by the point's GT label
                                    (the anisotropy-acquisition check).
-    col 2  DBSCAN clusters       : clustering on the learned anisotropic distance
-                                   matrix; points colored by cluster id (-1=noise).
 
-    ``threshold`` is kept for call-site compatibility (unused in this view).
+    ``threshold``, ``backend``, ``eps``, and ``min_samples`` are kept for call-site
+    compatibility (unused).
     """
+    del threshold, backend, eps, min_samples
+
     model.eval()
-    fig, axes = plt.subplots(3, 3, figsize=(15, 15))
+    fig, axes = plt.subplots(3, 2, figsize=(10, 15))
     fig.suptitle(f"Epoch {epoch} - {title_prefix} Results", fontsize=16)
 
     os.makedirs(output_dir, exist_ok=True)
@@ -90,40 +75,17 @@ def visualize(
             in_m = labels_np == 0
             out_m = labels_np == 1
 
-            # col 0: GT labels
             ax0 = axes[i, 0]
             ax0.scatter(data_np[in_m, 0], data_np[in_m, 1], c=INLIER_COLOR, s=10, label="Inlier (GT)")
             ax0.scatter(data_np[out_m, 0], data_np[out_m, 1], c=OUTLIER_COLOR, s=10, label="Outlier (GT)")
             ax0.set_title(f"Sample {i + 1}: GT Labels")
             ax0.legend(loc="upper right", fontsize=8)
 
-            # col 1: GT points (copied) + learned ellipses colored by GT label
             ax1 = axes[i, 1]
             ax1.scatter(data_np[in_m, 0], data_np[in_m, 1], c=INLIER_COLOR, s=8)
             ax1.scatter(data_np[out_m, 0], data_np[out_m, 1], c=OUTLIER_COLOR, s=8)
             _draw_ellipses(ax1, data_np, params_np, labels_np)
             ax1.set_title(f"Sample {i + 1}: Learned Ellipses (GT-colored)")
-
-            # col 2: DBSCAN on learned anisotropic distance
-            ax2 = axes[i, 2]
-            eps_i = eps if eps is not None else _auto_eps(data_np, params_np, backend)
-            if eps_i is not None and eps_i > 0:
-                cl = apply_anisotropic_dbscan(
-                    data_np, params_np, eps=eps_i, min_samples=min_samples, backend=backend
-                )
-                uniq = sorted(set(cl.tolist()))
-                cmap = plt.get_cmap("tab10")
-                for j, c in enumerate(uniq):
-                    m = cl == c
-                    if c == -1:
-                        ax2.scatter(data_np[m, 0], data_np[m, 1], c="0.4", s=12, marker="x", label="noise")
-                    else:
-                        ax2.scatter(data_np[m, 0], data_np[m, 1], color=cmap(j % 10), s=12, label=f"cl {c}")
-                n_clusters = len([c for c in uniq if c != -1])
-                ax2.set_title(f"Sample {i + 1}: DBSCAN ({n_clusters} cl, eps={eps_i:.3f})")
-                ax2.legend(loc="upper right", fontsize=7)
-            else:
-                ax2.set_title(f"Sample {i + 1}: DBSCAN (degenerate distances)")
 
             for ax in axes[i]:
                 ax.set_aspect("equal")

@@ -7,6 +7,7 @@ DBSCAN is **not** involved in this metric.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -36,6 +37,7 @@ class TopoWdistOptions:
     prob_weighting: bool
     teacher_local_pca_k: int = 10
     teacher_local_pca_normalize_axes: bool = True
+    teacher_local_pca_major_scale: float = 1.0
     eps_scale: float = 1.0
     scale_mode: str = "fixed"
     max_points: int | None = None
@@ -62,9 +64,22 @@ class TopoWdistOptions:
             "scale_mode",
             str(self.scale_mode).strip().lower(),
         )
+        object.__setattr__(
+            self,
+            "teacher_local_pca_major_scale",
+            float(self.teacher_local_pca_major_scale),
+        )
         if self.scale_mode not in ("fixed", "median"):
             raise ValueError(
                 f"scale_mode must be 'fixed' or 'median', got {self.scale_mode!r}"
+            )
+        if (
+            not math.isfinite(self.teacher_local_pca_major_scale)
+            or self.teacher_local_pca_major_scale <= 0.0
+        ):
+            raise ValueError(
+                "teacher_local_pca_major_scale must be a finite positive float, "
+                f"got {self.teacher_local_pca_major_scale!r}"
             )
 
 
@@ -112,6 +127,9 @@ def topo_wdist_options_from_config(config: dict[str, Any]) -> TopoWdistOptions:
         teacher_local_pca_normalize_axes = bool(
             _require_loss_key("teacher_local_pca_normalize_axes")
         )
+        teacher_local_pca_major_scale = float(
+            _require_loss_key("teacher_local_pca_major_scale")
+        )
     else:
         # Euclidean teacher never reads the PCA fields; keep declared defaults
         # for the dataclass without allowing them to leak into local_pca runs.
@@ -126,6 +144,12 @@ def topo_wdist_options_from_config(config: dict[str, Any]) -> TopoWdistOptions:
                 training_cfg.get("teacher_local_pca_normalize_axes", True),
             )
         )
+        teacher_local_pca_major_scale = float(
+            loss_cfg.get(
+                "teacher_local_pca_major_scale",
+                training_cfg.get("teacher_local_pca_major_scale", 1.0),
+            )
+        )
 
     max_pts = training_cfg.get("topo_loss_max_points", loss_cfg.get("topo_loss_max_points"))
     return TopoWdistOptions(
@@ -133,6 +157,7 @@ def topo_wdist_options_from_config(config: dict[str, Any]) -> TopoWdistOptions:
         distance_backend=str(topo_cfg["distance_backend"]).lower().strip(),
         teacher_local_pca_k=teacher_local_pca_k,
         teacher_local_pca_normalize_axes=teacher_local_pca_normalize_axes,
+        teacher_local_pca_major_scale=teacher_local_pca_major_scale,
         eps_scale=eps_scale,
         scale_mode=scale_mode,
         max_points=int(max_pts) if max_pts is not None else None,
@@ -195,6 +220,7 @@ def compute_topo_wdist(
             ellphi_differentiable=False,
             local_pca_k=opts.teacher_local_pca_k,
             local_pca_normalize_axes=opts.teacher_local_pca_normalize_axes,
+            local_pca_major_scale=opts.teacher_local_pca_major_scale,
             max_points=opts.max_points,
             need_clean_scales=(opts.scale_mode == "median"),
         )

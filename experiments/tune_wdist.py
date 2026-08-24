@@ -9,9 +9,9 @@ Each trial:
 2. Loads ``best_model.pth`` (val_topo selection checkpoint; hard-fail if missing).
 3. Objective = mean val **topo W-Dist** (learned ellipses vs local_pca teacher PD).
 
-Base config ``tune_mnist_h1`` sets
-``teacher_mode: local_pca``, H1-only persistence, and ``size_mode: power``.
-``w_class: 0``, ``selection.metric: val_topo``.
+Base config ``tune_rings`` sets
+``teacher_mode: local_pca``, H0+H1 persistence, thin rings + radial outliers,
+and ``size_mode: power``. ``w_class: 0``, ``selection.metric: val_topo``.
 
 Usage (parallel, recommended)::
 
@@ -32,9 +32,10 @@ from optuna.study import MaxTrialsCallback
 from optuna.trial import TrialState
 
 from tda_ml.checkpoint_io import resolve_val_topo_checkpoint
+from tda_ml.val_topo_cliff import ValTopoCliffError, cliff_max_from_config
 from tda_ml.config import deep_update, load_config
 from tda_ml.main import main as train_main
-from tda_ml.preflight import paper_aniso_fields, preflight_wdist_tune_study
+from tda_ml.preflight import paper_aniso_fields, preflight_wdist_tune_study, resolve_experiment_contract
 from tda_ml.supervised_diagnostics import git_revision
 from tda_ml.topo_wdist import TopoWdistOptions, compute_topo_wdist, topo_wdist_options_from_config
 
@@ -48,16 +49,17 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CHECKPOINT_POLICY = "val_topo_best"
 SAVE_EVERY = 1
 
-# Narrow bands (shared with tune_mcc power protocol).
-NARROW_W_TOPO_RANGE = (0.05, 0.25)
-NARROW_W_SIZE_RANGE = (0.1, 0.6)
-NARROW_W_ANISO_RANGE = (0.03, 0.15)
-NARROW_LR_RANGE = (1e-4, 5e-4)
+# Narrow bands for H0+H1 rings + teacher_local_pca_major_scale=0.083.
+# Objective remains val topo W-Dist; the band is the declared search constraint.
+NARROW_W_TOPO_RANGE = (0.008, 0.045)
+NARROW_W_SIZE_RANGE = (0.10, 0.40)
+NARROW_W_ANISO_RANGE = (0.05, 0.15)
+NARROW_LR_RANGE = (1.2e-4, 3.0e-4)
 
-# Legacy wide search.
+# Legacy wide search (also shifted down historically for H0+H1).
 WIDE_W_ANISO_RANGE = (0.05, 5.0)
 WIDE_W_SIZE_RANGE = (0.005, 0.5)
-WIDE_W_TOPO_RANGE = (0.02, 0.5)
+WIDE_W_TOPO_RANGE = (0.0005, 0.5)
 WIDE_LR_RANGE = (1e-4, 2e-3)
 
 
@@ -90,6 +92,9 @@ def build_trial_config(
     size_power: float = 1.5,
 ) -> dict[str, Any]:
     cfg = load_config(base_config, project_root=REPO_ROOT)
+    homology_dimensions = list(
+        resolve_experiment_contract(cfg)["homology_dimensions"]
+    )
     overrides = {
         "meta": {"config_id": f"tune_t{trial_number:03d}", "run_slug": f"t{trial_number:03d}"},
         "loss": {
@@ -114,7 +119,7 @@ def build_trial_config(
             "topology_loss": {
                 "distance_backend": backend,
                 "prob_weighting": False,
-                "homology_dimensions": [1],
+                "homology_dimensions": homology_dimensions,
             }
         },
         "outputs": {"base_dir": out_base, "save_every": SAVE_EVERY},
@@ -164,10 +169,19 @@ def make_objective(args: argparse.Namespace):
             size_ref=args.size_ref,
             size_power=args.size_power,
         )
-        result = train_main(config=cfg)
+        try:
+            result = train_main(config=cfg)
+        except ValTopoCliffError as exc:
+            trial.set_user_attr("val_topo_cliff_passed", False)
+            trial.set_user_attr("val_topo_cliff_error", str(exc))
+            raise optuna.TrialPruned(str(exc)) from exc
         run_dir = Path(result["run_dir"])
 
         ckpt_name, ckpt_epoch, val_topo_sel = resolve_val_topo_checkpoint(run_dir)
+        cliff_max = cliff_max_from_config(cfg)
+        if cliff_max is not None:
+            trial.set_user_attr("val_topo_cliff_max", cliff_max)
+            trial.set_user_attr("val_topo_cliff_passed", True)
         topo_options = topo_wdist_options_from_config(cfg)
         model = load_model_from_run(run_dir, cfg, device)
         loader = build_split_loader(cfg, "val", device)
@@ -193,7 +207,7 @@ def make_objective(args: argparse.Namespace):
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     # No implicit default: every study must state its config surface explicitly
-    # (power stack uses tune_mnist_h1).
+    # (power stack uses tune_rings).
     p.add_argument("--base-config", type=str, required=True)
     p.add_argument("--n-trials", type=int, default=50)
     p.add_argument(
@@ -254,6 +268,9 @@ def main() -> int:
     args = parse_args()
     Path(args.out_base).mkdir(parents=True, exist_ok=True)
     base_cfg_for_aniso = load_config(args.base_config, project_root=REPO_ROOT)
+    homology_dimensions = list(
+        resolve_experiment_contract(base_cfg_for_aniso)["homology_dimensions"]
+    )
     preflight = preflight_wdist_tune_study(
         base_config=args.base_config,
         project_root=REPO_ROOT,
@@ -263,7 +280,7 @@ def main() -> int:
                 "topology_loss": {
                     "distance_backend": args.backend,
                     "prob_weighting": False,
-                    "homology_dimensions": [1],
+                    "homology_dimensions": homology_dimensions,
                 }
             },
             "loss": {
@@ -319,7 +336,18 @@ def main() -> int:
         print(f"[worker done] completed trials in study so far: {n_done}")
         return 0
 
-    best = study.best_trial
+    complete = [
+        t
+        for t in study.trials
+        if t.state == TrialState.COMPLETE and t.value is not None
+    ]
+    if not complete:
+        raise RuntimeError(
+            f"No COMPLETE Optuna trials in study {args.study_name!r}; cannot write best. "
+            "If require_val_topo_cliff is enabled, all trials may have been pruned "
+            "for missing the val_topo phase transition — lengthen --tune-epochs / expand search."
+        )
+    best = min(complete, key=lambda t: float(t.value))
     w_aniso_range, w_size_range, w_topo_range, lr_range = search_ranges(
         narrow=bool(args.narrow_search)
     )

@@ -143,7 +143,9 @@ class TestPreflightTuneJson(unittest.TestCase):
                 '"best_params":{"w_topo":0.1,"w_aniso":0.1,"w_size":0.1,"lr":1e-4}}\n',
                 encoding="utf-8",
             )
-            with self.assertRaisesRegex(ValueError, "Re-tune with the H1-only stack"):
+            with self.assertRaisesRegex(
+                ValueError, r"Re-tune with the matching Methods stack"
+            ):
                 preflight_tune_json(
                     path,
                     expected_contract=PAPER_NO_CLS_CONTRACT,
@@ -194,6 +196,8 @@ class TestPreflightTuneJson(unittest.TestCase):
 class TestPaperNoClsContract(unittest.TestCase):
     @staticmethod
     def _valid_config() -> dict:
+        from tda_ml.preflight import PAPER_NO_CLS_OUTLIER_CONTRACT
+
         return {
             "model": {
                 "topology_loss": {
@@ -204,12 +208,15 @@ class TestPaperNoClsContract(unittest.TestCase):
             },
             "loss": {
                 "teacher_mode": "local_pca",
-                "aniso_mode": "elongate",
+                "aniso_mode": "elongate_barrier",
+                "aniso_barrier_threshold": 6.0,
                 "size_mode": "power",
                 "w_class": 0.0,
                 "teacher_local_pca_k": 10,
                 "teacher_local_pca_normalize_axes": True,
+                "teacher_local_pca_major_scale": 0.4,
             },
+            "data": dict(PAPER_NO_CLS_OUTLIER_CONTRACT),
         }
 
     def test_explicit_contract_passes(self):
@@ -239,25 +246,25 @@ class TestPaperNoClsContract(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "contract mismatch"):
             assert_paper_no_cls_contract(config)
 
-    def test_barrier_variant_passes_with_explicit_threshold(self):
+    def test_elongate_ablation_passes(self):
         from tda_ml.preflight import (
-            PAPER_NO_CLS_BARRIER_CONTRACT,
+            PAPER_NO_CLS_ELONGATE_CONTRACT,
             assert_paper_no_cls_contract,
         )
 
         config = self._valid_config()
-        config["loss"]["aniso_mode"] = "elongate_barrier"
-        config["loss"]["aniso_barrier_threshold"] = 6.0
+        del config["loss"]["aniso_barrier_threshold"]
+        config["loss"]["aniso_mode"] = "elongate"
         self.assertEqual(
             assert_paper_no_cls_contract(config),
-            PAPER_NO_CLS_BARRIER_CONTRACT,
+            PAPER_NO_CLS_ELONGATE_CONTRACT,
         )
 
     def test_barrier_variant_without_threshold_raises(self):
         from tda_ml.preflight import assert_paper_no_cls_contract
 
         config = self._valid_config()
-        config["loss"]["aniso_mode"] = "elongate_barrier"
+        del config["loss"]["aniso_barrier_threshold"]
         with self.assertRaisesRegex(ValueError, "aniso_barrier_threshold"):
             assert_paper_no_cls_contract(config)
 
@@ -265,7 +272,6 @@ class TestPaperNoClsContract(unittest.TestCase):
         from tda_ml.preflight import assert_paper_no_cls_contract
 
         config = self._valid_config()
-        config["loss"]["aniso_mode"] = "elongate_barrier"
         config["loss"]["aniso_barrier_threshold"] = 3.0
         with self.assertRaisesRegex(ValueError, "contract mismatch"):
             assert_paper_no_cls_contract(config)
@@ -274,9 +280,6 @@ class TestPaperNoClsContract(unittest.TestCase):
         from tda_ml.preflight import paper_aniso_fields
 
         config = self._valid_config()
-        self.assertEqual(paper_aniso_fields(config), {"aniso_mode": "elongate"})
-        config["loss"]["aniso_mode"] = "elongate_barrier"
-        config["loss"]["aniso_barrier_threshold"] = 6.0
         self.assertEqual(
             paper_aniso_fields(config),
             {"aniso_mode": "elongate_barrier", "aniso_barrier_threshold": 6.0},
@@ -284,6 +287,8 @@ class TestPaperNoClsContract(unittest.TestCase):
         del config["loss"]["aniso_barrier_threshold"]
         with self.assertRaisesRegex(ValueError, "aniso_barrier_threshold"):
             paper_aniso_fields(config)
+        config["loss"]["aniso_mode"] = "elongate"
+        self.assertEqual(paper_aniso_fields(config), {"aniso_mode": "elongate"})
 
 
 class TestResolveValTopoCheckpoint(unittest.TestCase):

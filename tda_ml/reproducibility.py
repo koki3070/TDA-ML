@@ -14,6 +14,7 @@ from tda_ml.numerical_eps import (
     INLIER_PROB_MIN,
     MIN_ELLPHI_CENTER_SEPARATION,
     NUMERICAL_EPS,
+    ORIENTATION_MIN_AXIS_GAP,
     PCA_RIDGE_EPS,
     ZERO_PAD_ABS_SUM,
 )
@@ -265,6 +266,7 @@ def build_reproducibility_manifest_fields(
             "EIGENVALUE_FLOOR": EIGENVALUE_FLOOR,
             "INLIER_PROB_MIN": INLIER_PROB_MIN,
             "ZERO_PAD_ABS_SUM": ZERO_PAD_ABS_SUM,
+            "ORIENTATION_MIN_AXIS_GAP": ORIENTATION_MIN_AXIS_GAP,
         },
         "ellphi_repo": build_ellphi_repo_manifest_fields(project_root),
     }

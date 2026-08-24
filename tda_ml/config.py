@@ -70,7 +70,10 @@ def deep_update(dst: dict[str, Any], src: dict[str, Any]) -> dict[str, Any]:
 def model_kwargs_from_config(config: dict[str, Any]) -> dict[str, Any]:
     """Keyword arguments for :class:`tda_ml.models.AnisotropicOutlierClassifier`."""
     model_cfg = config.get("model") or {}
+    # Ablation locks: missing key = production (unlocked). Explicit true only when opted in.
     return {
         "point_dim": int(model_cfg.get("point_dim", 2)),
         "feature_dim": int(model_cfg.get("feature_dim", 128)),
+        "freeze_ellipse_angle": bool(model_cfg.get("freeze_ellipse_angle", False)),
+        "enforce_a_ge_b": bool(model_cfg.get("enforce_a_ge_b", False)),
     }

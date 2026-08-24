@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -11,6 +12,14 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "experiments"))
+
+
+def _subprocess_env() -> dict[str, str]:
+    """Prefer this worktree over an editable install of another checkout."""
+    env = dict(os.environ)
+    prev = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = str(REPO) if not prev else f"{REPO}{os.pathsep}{prev}"
+    return env
 
 from aggregate_paper_multiseed import discover_seed_metrics  # noqa: E402
 from paper_run_freshness import inspect_seed_metrics  # noqa: E402
@@ -127,7 +136,7 @@ class TestPreflightHomology(unittest.TestCase):
         from tda_ml.config import deep_update, load_config
 
         cfg = load_config(
-            "paper_mnist_h1",
+            "paper_rings",
             project_root=REPO,
         )
         bad = deep_update(
@@ -232,6 +241,7 @@ class TestFreshnessCLI(unittest.TestCase):
                 str(tune_json),
             ],
             cwd=str(REPO),
+            env=_subprocess_env(),
             capture_output=True,
             text=True,
             check=False,
@@ -346,6 +356,153 @@ class TestPaperContractExpanded(unittest.TestCase):
         self.assertEqual(PAPER_NO_CLS_CONTRACT["w_class"], 0.0)
         self.assertEqual(PAPER_NO_CLS_CONTRACT["teacher_local_pca_k"], 10)
         self.assertTrue(PAPER_NO_CLS_CONTRACT["teacher_local_pca_normalize_axes"])
+        self.assertEqual(PAPER_NO_CLS_CONTRACT["homology_dimensions"], [1])
+        self.assertEqual(PAPER_NO_CLS_CONTRACT["teacher_local_pca_major_scale"], 0.4)
+        self.assertEqual(PAPER_NO_CLS_CONTRACT["outlier_mode"], "local_pca_tangent")
+
+    def test_rings_contract_includes_w_class_and_pca(self):
+        from tda_ml.preflight import RINGS_NO_CLS_CONTRACT
+
+        self.assertEqual(RINGS_NO_CLS_CONTRACT["w_class"], 0.0)
+        self.assertEqual(RINGS_NO_CLS_CONTRACT["teacher_local_pca_k"], 10)
+        self.assertTrue(RINGS_NO_CLS_CONTRACT["teacher_local_pca_normalize_axes"])
+        self.assertEqual(RINGS_NO_CLS_CONTRACT["teacher_local_pca_major_scale"], 0.083)
+        self.assertEqual(RINGS_NO_CLS_CONTRACT["aniso_mode"], "elongate_barrier")
+        self.assertEqual(RINGS_NO_CLS_CONTRACT["aniso_barrier_threshold"], 6.0)
+        self.assertEqual(RINGS_NO_CLS_CONTRACT["homology_dimensions"], [0, 1])
+        self.assertEqual(RINGS_NO_CLS_CONTRACT["dataset_type"], "thin_rings")
+        self.assertEqual(RINGS_NO_CLS_CONTRACT["outlier_mode"], "ring_radial")
+
+    def test_cliff_failed_only_is_empty_result_not_missing(self):
+        import csv
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tune = root / "best.json"
+            tune.write_text("{}", encoding="utf-8")
+            run = root / "paper_s42_x"
+            logs = run / "logs"
+            logs.mkdir(parents=True)
+            (logs / "run_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "seed": 42,
+                        "tune_json": str(tune.resolve()),
+                        "source_revision": "abc",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (logs / "paper_metrics_test_wdist.json").write_text("{}", encoding="utf-8")
+            with (logs / "metrics.csv").open("w", newline="", encoding="utf-8") as f:
+                w = csv.DictWriter(f, fieldnames=["epoch", "val_topo_loss"])
+                w.writeheader()
+                w.writerow({"epoch": 1, "val_topo_loss": 0.45})
+            with self.assertRaisesRegex(RuntimeError, "empty-result"):
+                inspect_seed_metrics(
+                    out_base=root,
+                    seed=42,
+                    tag="wdist",
+                    tune_json=tune,
+                    expected_revision="abc",
+                    require_val_topo_cliff=True,
+                    val_topo_cliff_max=0.3,
+                )
+
+    def test_cli_cliff_failed_exits_2_not_1(self):
+        import csv
+
+        from tda_ml.supervised_diagnostics import git_revision
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tune = root / "best.json"
+            tune.write_text("{}", encoding="utf-8")
+            logs = root / "paper_s42_x" / "logs"
+            logs.mkdir(parents=True)
+            (logs / "run_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "seed": 42,
+                        "tune_json": str(tune.resolve()),
+                        "source_revision": git_revision(REPO),
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (logs / "paper_metrics_test_wdist.json").write_text("{}", encoding="utf-8")
+            with (logs / "metrics.csv").open("w", newline="", encoding="utf-8") as f:
+                w = csv.DictWriter(f, fieldnames=["epoch", "val_topo_loss"])
+                w.writeheader()
+                w.writerow({"epoch": 1, "val_topo_loss": 0.45})
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(REPO / "experiments" / "paper_run_freshness.py"),
+                    "--out-base",
+                    str(root),
+                    "--seed",
+                    "42",
+                    "--tag",
+                    "wdist",
+                    "--tune-json",
+                    str(tune),
+                    "--require-val-topo-cliff",
+                    "--val-topo-cliff-max",
+                    "0.3",
+                ],
+                cwd=str(REPO),
+                env=_subprocess_env(),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(proc.returncode, 2, proc.stderr)
+            self.assertNotEqual(proc.returncode, 1)
+            self.assertIn("empty-result", proc.stderr)
+
+
+class TestRingsContract(unittest.TestCase):
+    def test_rings_yaml_passes_rings_contract(self):
+        from tda_ml.config import load_config
+        from tda_ml.preflight import (
+            RINGS_NO_CLS_CONTRACT,
+            assert_paper_no_cls_contract,
+            assert_rings_no_cls_contract,
+            resolve_experiment_contract,
+        )
+
+        cfg = load_config(
+            "paper_rings",
+            project_root=REPO,
+        )
+        self.assertEqual(assert_rings_no_cls_contract(cfg), RINGS_NO_CLS_CONTRACT)
+        self.assertEqual(resolve_experiment_contract(cfg), RINGS_NO_CLS_CONTRACT)
+        with self.assertRaisesRegex(ValueError, "Paper no_cls"):
+            assert_paper_no_cls_contract(cfg)
+
+    def test_tune_rings_yaml_resolves(self):
+        from tda_ml.config import load_config
+        from tda_ml.preflight import RINGS_NO_CLS_CONTRACT, resolve_experiment_contract
+
+        cfg = load_config(
+            "tune_rings",
+            project_root=REPO,
+        )
+        self.assertEqual(resolve_experiment_contract(cfg), RINGS_NO_CLS_CONTRACT)
+
+    def test_rings_notopo_ablation_yaml_resolves(self):
+        from tda_ml.config import load_config
+        from tda_ml.preflight import RINGS_NO_CLS_CONTRACT, resolve_experiment_contract
+
+        cfg = load_config(
+            "paper_rings_notopo",
+            project_root=REPO,
+        )
+        self.assertEqual(resolve_experiment_contract(cfg), RINGS_NO_CLS_CONTRACT)
+        self.assertEqual(cfg["loss"]["w_topo"], 0.0)
+        self.assertFalse(cfg["training"]["require_val_topo_cliff"])
+        self.assertEqual(cfg["training"]["selection"]["metric"], "dbscan_mcc")
 
 
 if __name__ == "__main__":

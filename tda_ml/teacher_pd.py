@@ -33,6 +33,7 @@ def compute_clean_teacher_batch(
     ellphi_differentiable: bool = False,
     local_pca_k: int = 10,
     local_pca_normalize_axes: bool = True,
+    local_pca_major_scale: float = 1.0,
     max_points: int | None = None,
     need_clean_scales: bool = False,
 ) -> tuple[list, list[float] | None]:
@@ -43,6 +44,9 @@ def compute_clean_teacher_batch(
       - ``euclidean``: VR on raw clean coordinates (legacy default).
       - ``local_pca``: ideal local-PCA ellipses + ``distance_backend`` distance matrix → VR
         (paper §3.3.2 ``D_ideal``; same filtration units as the prediction side).
+
+    ``local_pca_major_scale`` multiplies teacher semi-axes after optional unit
+    normalization (paper no_cls uses ``0.4``).
 
     When ``need_clean_scales`` is True (``topo_scale_mode='median'``), returns per-sample
     medians of the teacher filtration: Euclidean pairwise median (euclidean mode) or
@@ -85,6 +89,7 @@ def compute_clean_teacher_batch(
                 pts.unsqueeze(0),
                 k=local_pca_k,
                 normalize_axes=local_pca_normalize_axes,
+                major_scale=local_pca_major_scale,
             )
             d_batch = compute_distance_matrix_batch(
                 pts.unsqueeze(0),

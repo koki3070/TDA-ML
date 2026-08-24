@@ -39,6 +39,23 @@ class TestTeacherMode(unittest.TestCase):
         self.assertTrue(torch.allclose(norm[:, 0], torch.ones_like(norm[:, 0]), atol=1e-5))
         self.assertGreater(float(raw[:, 0].max()), float(raw[:, 0].min()))
 
+    def test_local_pca_major_scale_preserves_aspect(self):
+        torch.manual_seed(2)
+        t = torch.linspace(0, 2 * torch.pi, 24)
+        pts = torch.stack([torch.cos(t), 0.2 * torch.sin(t)], dim=1)
+        unit = local_pca_ellipse_params(pts, k=8, normalize_axes=True, major_scale=1.0)
+        scaled = local_pca_ellipse_params(pts, k=8, normalize_axes=True, major_scale=0.4)
+        self.assertTrue(
+            torch.allclose(scaled[:, 0], torch.full_like(scaled[:, 0], 0.4), atol=1e-5)
+        )
+        aspect_unit = unit[:, 0] / unit[:, 1].clamp_min(1e-8)
+        aspect_scaled = scaled[:, 0] / scaled[:, 1].clamp_min(1e-8)
+        self.assertTrue(torch.allclose(aspect_unit, aspect_scaled, atol=1e-5))
+        with self.assertRaises(ValueError):
+            local_pca_ellipse_params(pts, k=8, major_scale=0.0)
+        with self.assertRaises(ValueError):
+            local_pca_ellipse_params(pts, k=8, major_scale=-1.0)
+
     def test_euclidean_teacher_runs(self):
         vr = VietorisRipsComplex(dim=1)
         clean = torch.randn(2, 15, 2)

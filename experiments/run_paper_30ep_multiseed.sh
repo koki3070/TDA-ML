@@ -48,9 +48,32 @@ MCC_OUT="${MCC_OUT:-outputs/supervised/paper30_mcc}"
 LOG_ROOT="${LOG_ROOT:-outputs/supervised/paper30_multiseed}"
 EPOCHS="${EPOCHS:-30}"
 DBSCAN_BACKEND="${DBSCAN_BACKEND:-mahalanobis}"
-BASE_CONFIG="${BASE_CONFIG:-paper_mnist_h1}"
+BASE_CONFIG="${BASE_CONFIG:-paper_rings}"
 # Declared paper contract variant the tune JSONs must match (elongate | elongate_barrier).
-ANISO_VARIANT="${ANISO_VARIANT:-elongate}"
+ANISO_VARIANT="${ANISO_VARIANT:-elongate_barrier}"
+# auto|mnist|rings — aggregate preflight contract (auto reads tune JSON dataset_type).
+EXPERIMENT_CONTRACT="${EXPERIMENT_CONTRACT:-auto}"
+# auto|off|strict|exclude-failed — val_topo cliff policy (auto: strict for rings).
+SEED_CLIFF_POLICY="${SEED_CLIFF_POLICY:-auto}"
+# When BASE_CONFIG is rings (or REQUIRE_VAL_TOPO_CLIFF=1), freshness ignores cliff-failed runs.
+REQUIRE_VAL_TOPO_CLIFF="${REQUIRE_VAL_TOPO_CLIFF:-}"
+if [[ -z "${REQUIRE_VAL_TOPO_CLIFF}" ]]; then
+  if [[ "${BASE_CONFIG}" == *rings* ]]; then
+    REQUIRE_VAL_TOPO_CLIFF=1
+  else
+    REQUIRE_VAL_TOPO_CLIFF=0
+  fi
+fi
+VAL_TOPO_CLIFF_MAX="${VAL_TOPO_CLIFF_MAX:-0.3}"
+# Rings: retry distinct training.model_seed values until val_topo cliff passes.
+CLIFF_INIT_RESTARTS="${CLIFF_INIT_RESTARTS:-}"
+if [[ -z "${CLIFF_INIT_RESTARTS}" ]]; then
+  if [[ "${BASE_CONFIG}" == *rings* ]]; then
+    CLIFF_INIT_RESTARTS=8
+  else
+    CLIFF_INIT_RESTARTS=1
+  fi
+fi
 
 mkdir -p "${LOG_ROOT}"
 
@@ -61,11 +84,16 @@ _metrics_done() {
   local tag="$3"
   local tune_json="$4"
   local rc=0
+  local cliff_args=()
+  if [[ "${REQUIRE_VAL_TOPO_CLIFF}" == "1" ]]; then
+    cliff_args+=(--require-val-topo-cliff --val-topo-cliff-max "${VAL_TOPO_CLIFF_MAX}")
+  fi
   uv run python experiments/paper_run_freshness.py \
     --out-base "${out_base}" \
     --seed "${seed}" \
     --tag "${tag}" \
-    --tune-json "${tune_json}" || rc=$?
+    --tune-json "${tune_json}" \
+    "${cliff_args[@]}" || rc=$?
   if [[ "${rc}" -eq 0 ]]; then
     return 0
   fi
@@ -101,6 +129,7 @@ _run_seed() {
     --tune-json "${tune_json}" \
     --tag "${tag}" \
     --dbscan-backend "${DBSCAN_BACKEND}" \
+    --cliff-init-restarts "${CLIFF_INIT_RESTARTS}" \
     >> "${log_file}" 2>&1
 }
 
@@ -195,6 +224,9 @@ AGG_ARGS=(
   --out-dir "${LOG_ROOT}"
   --seeds "${SEEDS[@]}"
   --aniso-variant "${ANISO_VARIANT}"
+  --experiment-contract "${EXPERIMENT_CONTRACT}"
+  --seed-cliff-policy "${SEED_CLIFF_POLICY}"
+  --val-topo-cliff-max "${VAL_TOPO_CLIFF_MAX}"
 )
 case "${MODE}" in
   wdist) AGG_ARGS+=(--methods wdist) ;;

@@ -12,12 +12,18 @@ from typing import Any, Sequence
 import numpy as np
 
 from tda_ml.preflight import (
-    PAPER_NO_CLS_BARRIER_CONTRACT,
     PAPER_NO_CLS_CONTRACT,
+    PAPER_NO_CLS_ELONGATE_CONTRACT,
+    RINGS_NO_CLS_CONTRACT,
     preflight_tune_json,
 )
+from tda_ml.reproducibility import RUN_STATUS_EMPTY_RESULT, RUN_STATUS_FAILED
 from tda_ml.run_paths import assert_no_legacy_paper_run_namespace
 from tda_ml.supervised_diagnostics import git_revision
+from tda_ml.val_topo_cliff import (
+    RINGS_VAL_TOPO_CLIFF_MAX,
+    evaluate_run_cliff,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PAPER_SEEDS = [42, 123, 456, 789, 1024]
@@ -84,21 +90,152 @@ def discover_seed_metrics(out_base: Path, test_glob: str) -> dict[int, dict[str,
     return by_seed
 
 
+def resolve_aggregate_contract(
+    *,
+    experiment_contract: str,
+    aniso_variant: str,
+    tune_payload: dict[str, Any],
+) -> tuple[str, dict[str, Any]]:
+    """Return ``(contract_name, contract_dict)`` for tune JSON preflight."""
+    if experiment_contract == "auto":
+        has_dataset_type = "dataset_type" in tune_payload
+        dataset_type = str(tune_payload.get("dataset_type", "")).strip().lower()
+        if dataset_type == "thin_rings":
+            experiment_contract = "rings"
+        elif dataset_type == "mnist":
+            experiment_contract = "mnist"
+        elif (
+            not has_dataset_type
+            and "tangent_pca_k" in tune_payload
+        ):
+            # Legacy MNIST near-tangent best JSON omitted dataset_type but
+            # recorded tangent_* keys — treat as explicit mnist Methods.
+            experiment_contract = "mnist"
+        elif has_dataset_type:
+            raise ValueError(
+                f"Unrecognized tune JSON dataset_type={dataset_type!r}; "
+                "use --experiment-contract mnist|rings"
+            )
+        else:
+            raise ValueError(
+                "tune JSON missing dataset_type; refusing silent mnist default "
+                "for --experiment-contract auto. Pass --experiment-contract "
+                "mnist|rings explicitly, or re-tune so the best JSON records "
+                "dataset_type (thin_rings|mnist)."
+            )
+
+    if experiment_contract == "rings":
+        if aniso_variant != "elongate_barrier":
+            raise ValueError(
+                "rings Methods contract requires --aniso-variant elongate_barrier "
+                f"(got {aniso_variant!r})"
+            )
+        return "rings", RINGS_NO_CLS_CONTRACT
+
+    if experiment_contract == "mnist":
+        contract = (
+            PAPER_NO_CLS_CONTRACT
+            if aniso_variant == "elongate_barrier"
+            else PAPER_NO_CLS_ELONGATE_CONTRACT
+        )
+        return "mnist", contract
+
+    raise ValueError(
+        f"--experiment-contract must be auto|mnist|rings; got {experiment_contract!r}"
+    )
+
+
+def resolve_cliff_policy(
+    *,
+    seed_cliff_policy: str,
+    contract_name: str,
+) -> str:
+    if seed_cliff_policy == "auto":
+        return "strict" if contract_name == "rings" else "off"
+    if seed_cliff_policy not in ("off", "strict", "exclude-failed"):
+        raise ValueError(
+            f"--seed-cliff-policy must be auto|off|strict|exclude-failed; "
+            f"got {seed_cliff_policy!r}"
+        )
+    return seed_cliff_policy
+
+
+def annotate_seed_cliffs(
+    by_seed: dict[int, dict[str, Any]],
+    *,
+    cliff_max: float,
+) -> dict[int, dict[str, Any]]:
+    annotated: dict[int, dict[str, Any]] = {}
+    for seed, row in by_seed.items():
+        report = evaluate_run_cliff(Path(row["run_dir"]), cliff_max=cliff_max)
+        annotated[seed] = {**row, **report}
+    return annotated
+
+
+def apply_cliff_policy(
+    *,
+    method: str,
+    by_seed: dict[int, dict[str, Any]],
+    expected_seeds: Sequence[int],
+    policy: str,
+    cliff_max: float,
+) -> tuple[list[int], list[int], dict[int, dict[str, Any]]]:
+    """Return ``(seeds_for_mean, failed_seeds, annotated_by_seed)``."""
+    annotated = annotate_seed_cliffs(by_seed, cliff_max=cliff_max)
+    if policy == "off":
+        return list(expected_seeds), [], annotated
+
+    failed = [
+        s
+        for s in expected_seeds
+        if s in annotated and not annotated[s]["val_topo_cliff_passed"]
+    ]
+    passed = [
+        s
+        for s in expected_seeds
+        if s in annotated and annotated[s]["val_topo_cliff_passed"]
+    ]
+    if policy == "strict" and failed:
+        detail = ", ".join(
+            f"seed={s} best_val_topo={annotated[s]['best_val_topo_loss']:.4f}"
+            for s in failed
+        )
+        raise ValueError(
+            f"{method}: val_topo cliff failed for seeds [{detail}] "
+            f"(cliff_max={cliff_max}). Re-tune/re-run those seeds, or pass "
+            "--seed-cliff-policy exclude-failed for a diagnostic survivor-only summary."
+        )
+    if policy == "exclude-failed":
+        if len(passed) < 2:
+            raise ValueError(
+                f"{method}: after excluding cliff-failed seeds {failed}, "
+                f"only {len(passed)} survivor(s); refusing aggregate "
+                "(need >=2 for mean±std)"
+            )
+        return passed, failed, annotated
+    return list(expected_seeds), failed, annotated
+
+
 def aggregate_row(
     *,
     method: str,
     by_seed: dict[int, dict[str, Any]],
     expected_seeds: Sequence[int],
     tune_json: str,
+    seeds_for_mean: Sequence[int] | None = None,
+    cliff_failed_seeds: Sequence[int] | None = None,
+    cliff_policy: str = "off",
+    cliff_max: float | None = None,
 ) -> dict[str, Any]:
-    missing = [s for s in expected_seeds if s not in by_seed]
+    mean_seeds = list(seeds_for_mean) if seeds_for_mean is not None else list(expected_seeds)
+    missing = [s for s in mean_seeds if s not in by_seed]
     if missing:
         raise ValueError(
             f"{method}: missing seeds {missing}; refusing partial aggregate"
         )
     expected_tune = str(Path(tune_json).resolve())
     mismatched = []
-    for seed in expected_seeds:
+    for seed in mean_seeds:
         actual = by_seed[seed].get("tune_json")
         if actual is None:
             mismatched.append((seed, None))
@@ -111,12 +248,24 @@ def aggregate_row(
             f"{method}: per-seed tune_json mismatch vs aggregate {expected_tune}: "
             f"{mismatched}"
         )
-    seeds_present = [by_seed[s] for s in expected_seeds]
+    seeds_present = [by_seed[s] for s in mean_seeds]
 
     mccs = [r["mcc"] for r in seeds_present]
     gmeans = [r["gmean"] for r in seeds_present]
     wdist = [r["wdist"] for r in seeds_present]
     n = len(seeds_present)
+    failed = list(cliff_failed_seeds or [])
+    notes = (
+        f"{n}/{len(expected_seeds)} seeds in mean; "
+        f"fixed tune weights from {expected_tune}; "
+        "30ep val_topo ckpt; maha DBSCAN eval; "
+        "wdist_* are diagnostics only (not main-table columns)"
+    )
+    if cliff_policy != "off":
+        notes += (
+            f"; cliff_policy={cliff_policy} cliff_max={cliff_max}; "
+            f"cliff_failed_seeds={failed}"
+        )
     return {
         "method": method,
         "mcc_mean": float(np.mean(mccs)),
@@ -125,11 +274,7 @@ def aggregate_row(
         "gmean_std": sample_std(gmeans),
         "wdist_mean": float(np.mean(wdist)),
         "wdist_std": sample_std(wdist),
-        "notes": (
-            f"{n}/{len(expected_seeds)} seeds; fixed tune weights from {expected_tune}; "
-            "30ep val_topo ckpt; maha DBSCAN eval; "
-            "wdist_* are diagnostics only (not main-table columns)"
-        ),
+        "notes": notes,
     }
 
 
@@ -176,10 +321,39 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--aniso-variant",
         choices=["elongate", "elongate_barrier"],
-        default="elongate",
+        default="elongate_barrier",
         help=(
             "Declared paper contract variant the tune JSONs must match "
-            "(elongate_barrier = degeneracy-guard stack)."
+            "(default elongate_barrier; elongate = ablation without aspect ceiling)."
+        ),
+    )
+    p.add_argument(
+        "--experiment-contract",
+        choices=["auto", "mnist", "rings"],
+        default="auto",
+        help=(
+            "Which declared contract the tune JSON must match. "
+            "auto: thin_rings → RINGS_NO_CLS_CONTRACT, else MNIST paper contract."
+        ),
+    )
+    p.add_argument(
+        "--seed-cliff-policy",
+        choices=["auto", "off", "strict", "exclude-failed"],
+        default="auto",
+        help=(
+            "How to treat seeds that never cross the val_topo cliff. "
+            "auto: strict for rings, off for MNIST. "
+            "strict: hard-fail if any seed fails. "
+            "exclude-failed: mean only over survivors (>=2)."
+        ),
+    )
+    p.add_argument(
+        "--val-topo-cliff-max",
+        type=float,
+        default=None,
+        help=(
+            "Cliff threshold for --seed-cliff-policy (default: "
+            f"{RINGS_VAL_TOPO_CLIFF_MAX} when policy is active)."
         ),
     )
     return p.parse_args()
@@ -187,20 +361,47 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    expected_contract = (
-        PAPER_NO_CLS_BARRIER_CONTRACT
-        if args.aniso_variant == "elongate_barrier"
-        else PAPER_NO_CLS_CONTRACT
-    )
     tune_paths = {
         "wdist": Path(args.wdist_tune_json),
         "mcc": Path(args.mcc_tune_json),
     }
+    # Resolve contract from the first requested method's tune JSON.
+    first_key = args.methods[0]
+    first_path = tune_paths[first_key]
+    if not first_path.is_absolute():
+        first_path = REPO_ROOT / first_path
+    first_payload = json.loads(first_path.read_text(encoding="utf-8"))
+    contract_name, expected_contract = resolve_aggregate_contract(
+        experiment_contract=args.experiment_contract,
+        aniso_variant=args.aniso_variant,
+        tune_payload=first_payload,
+    )
+    cliff_policy = resolve_cliff_policy(
+        seed_cliff_policy=args.seed_cliff_policy,
+        contract_name=contract_name,
+    )
+    cliff_max = (
+        float(args.val_topo_cliff_max)
+        if args.val_topo_cliff_max is not None
+        else float(RINGS_VAL_TOPO_CLIFF_MAX)
+    )
+
     for key in args.methods:
         path = tune_paths[key]
         if not path.is_absolute():
             path = REPO_ROOT / path
-        preflight_tune_json(path, expected_contract=expected_contract)
+        payload = preflight_tune_json(path, expected_contract=expected_contract)
+        # Cross-check auto/explicit contract agreement across methods.
+        other_name, _ = resolve_aggregate_contract(
+            experiment_contract=args.experiment_contract,
+            aniso_variant=args.aniso_variant,
+            tune_payload=payload,
+        )
+        if other_name != contract_name:
+            raise ValueError(
+                f"Tune JSON contract mismatch across methods: {first_key}={contract_name}, "
+                f"{key}={other_name}"
+            )
         tune_paths[key] = path.resolve()
 
     wdist_by_seed = discover_seed_metrics(
@@ -217,14 +418,49 @@ def main() -> int:
         "mcc": ("proposed_mcc_30ep", mcc_by_seed, str(tune_paths["mcc"])),
     }
     rows: list[dict[str, Any]] = []
+    cliff_annotations: dict[str, Any] = {}
     for key in args.methods:
         method, by_seed, tune_json = method_specs[key]
+        mean_seeds, failed_seeds, annotated = apply_cliff_policy(
+            method=method,
+            by_seed=by_seed,
+            expected_seeds=args.seeds,
+            policy=cliff_policy,
+            cliff_max=cliff_max,
+        )
+        cliff_annotations[key] = {
+            "seeds_in_mean": mean_seeds,
+            "cliff_failed_seeds": failed_seeds,
+            "per_seed": {
+                str(s): {
+                    "val_topo_cliff_passed": annotated[s]["val_topo_cliff_passed"],
+                    "best_val_topo_loss": annotated[s]["best_val_topo_loss"],
+                    "best_val_topo_epoch": annotated[s]["best_val_topo_epoch"],
+                    "run_status": (
+                        "completed"
+                        if annotated[s]["val_topo_cliff_passed"]
+                        else RUN_STATUS_EMPTY_RESULT
+                    ),
+                }
+                for s in args.seeds
+                if s in annotated
+            },
+        }
+        # Keep discover payloads for manifest, but also surface cliff fields.
+        if key == "wdist":
+            wdist_by_seed = annotated
+        else:
+            mcc_by_seed = annotated
         rows.append(
             aggregate_row(
                 method=method,
-                by_seed=by_seed,
+                by_seed=annotated,
                 expected_seeds=args.seeds,
                 tune_json=tune_json,
+                seeds_for_mean=mean_seeds,
+                cliff_failed_seeds=failed_seeds,
+                cliff_policy=cliff_policy,
+                cliff_max=cliff_max if cliff_policy != "off" else None,
             )
         )
 
@@ -240,13 +476,29 @@ def main() -> int:
         "mcc_out": str(args.mcc_out),
         "wdist_tune_json": str(tune_paths["wdist"]),
         "mcc_tune_json": str(tune_paths["mcc"]),
+        "experiment_contract": contract_name,
         "paper_no_cls_contract": expected_contract,
+        "seed_cliff_policy": cliff_policy,
+        "val_topo_cliff_max": cliff_max if cliff_policy != "off" else None,
+        "cliff_annotations": cliff_annotations,
         "per_seed": {
             "wdist": wdist_by_seed,
             "mcc": mcc_by_seed,
         },
-        "warnings": [],
+        "warnings": (
+            [
+                f"cliff_policy=exclude-failed; survivors-only mean "
+                f"(failed={cliff_annotations.get('wdist', {}).get('cliff_failed_seeds')})"
+            ]
+            if cliff_policy == "exclude-failed"
+            else []
+        ),
         "summary_csv": str(summary_path),
+        "run_status_note": (
+            f"cliff-failed seeds recorded as {RUN_STATUS_EMPTY_RESULT}/{RUN_STATUS_FAILED}"
+            if cliff_policy != "off"
+            else None
+        ),
     }
     (out_dir / "MANIFEST_proposed.json").write_text(json.dumps(manifest, indent=2) + "\n")
 

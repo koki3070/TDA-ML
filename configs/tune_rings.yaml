@@ -1,0 +1,85 @@
+# Shared Optuna tune base for thin-rings Methods experiments (same stack as
+# paper_rings). Role=tune.
+# Default epochs=30 so trials can reach the val_topo phase-transition cliff
+# (historically ~ep17–23). Trial objective is chosen by the tune driver.
+
+meta:
+  config_id: "tune_rings"
+
+model:
+  point_dim: 2
+  feature_dim: 128
+  ellipse_param_dim: 5
+  threshold: 0.5
+  topology_loss:
+    metric_type: "anisotropic"
+    distance_backend: "ellphi"
+    ellphi_differentiable: true
+    prob_weighting: false
+    homology_dimensions: [0, 1]
+
+loss:
+  w_class: 0.0
+  w_topo: 0.02   # Prior centre; search bands in tune scripts
+  w_aniso: 0.09
+  w_size: 0.22
+  pos_weight: 1.0
+  aniso_mode: "elongate_barrier"
+  aniso_barrier_threshold: 6.0
+  size_mode: power
+  size_ref: 1.34
+  size_power: 1.5
+  teacher_mode: local_pca
+  teacher_local_pca_k: 10
+  teacher_local_pca_normalize_axes: true
+  # Data-intrinsic: median raw local-PCA major on val clean (seed=42, n=500).
+  teacher_local_pca_major_scale: 0.083
+  topo_eps_scale: 1.0
+  topo_scale_mode: fixed
+
+training:
+  lr: 0.00018
+  epochs: 30
+  grad_clip_value: 1.0
+  visualize_every: 10000
+  warmup_epochs: 0
+  require_val_topo_cliff: true
+  val_topo_cliff_max: 0.3
+  val_topo_cliff_deadline_epoch: 25
+  selection:
+    metric: val_topo
+    eval_every: 1
+    dbscan:
+      eps_values: null
+      min_samples_values: null
+
+data:
+  dataset_type: thin_rings
+  outlier_mode: ring_radial
+  max_points: 100
+  num_outliers: 20
+  noise_std: 0.005
+  ring_count_min: 1
+  ring_count_max: 2
+  ring_radius_min: 0.25
+  ring_radius_max: 0.60
+  ring_center_box: 0.30
+  ring_outlier_offset_min: 0.03
+  ring_outlier_offset_max: 0.06
+  ring_outlier_clearance: 0.03
+  seed: 42
+  train_size: 4500
+  val_size: 500
+  test_size: 1000
+  num_workers: 2
+  batch_size: 64
+  pin_memory: true
+
+performance:
+  cudnn_benchmark: true
+  enable_tf32: true
+  matmul_precision: high
+
+outputs:
+  base_dir: "outputs"
+  save_every: 1

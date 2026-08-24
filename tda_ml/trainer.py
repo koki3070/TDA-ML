@@ -1,4 +1,5 @@
 import logging
+import math
 import os
 
 import torch
@@ -224,8 +225,16 @@ class Trainer:
                 size_default,
             )
 
-        pos_weight_val = config.get('loss', {}).get('pos_weight', 1.0)
-        pos_weight = torch.tensor([pos_weight_val], device=self.device) if pos_weight_val != 1.0 else None
+        if "pos_weight" not in loss_cfg:
+            raise ValueError(
+                "loss.pos_weight must be set explicitly; refusing silent 1.0 default"
+            )
+        pos_weight_val = float(loss_cfg["pos_weight"])
+        pos_weight = (
+            torch.tensor([pos_weight_val], device=self.device)
+            if pos_weight_val != 1.0
+            else None
+        )
 
         # Initialize Losses
         self.class_loss_fn = ClassificationLoss(pos_weight=pos_weight)
@@ -286,6 +295,14 @@ class Trainer:
                     "loss.teacher_local_pca_normalize_axes must be set explicitly "
                     "when teacher_mode='local_pca'; refusing silent true default"
                 )
+            if (
+                "teacher_local_pca_major_scale" not in loss_cfg
+                and "teacher_local_pca_major_scale" not in training_cfg
+            ):
+                raise ValueError(
+                    "loss.teacher_local_pca_major_scale must be set explicitly "
+                    "when teacher_mode='local_pca'; refusing silent 1.0 default"
+                )
             self.teacher_local_pca_k = int(
                 loss_cfg.get(
                     "teacher_local_pca_k",
@@ -298,6 +315,20 @@ class Trainer:
                     training_cfg.get("teacher_local_pca_normalize_axes"),
                 )
             )
+            self.teacher_local_pca_major_scale = float(
+                loss_cfg.get(
+                    "teacher_local_pca_major_scale",
+                    training_cfg.get("teacher_local_pca_major_scale"),
+                )
+            )
+            if (
+                not math.isfinite(self.teacher_local_pca_major_scale)
+                or self.teacher_local_pca_major_scale <= 0.0
+            ):
+                raise ValueError(
+                    "loss.teacher_local_pca_major_scale must be a finite positive "
+                    f"float, got {self.teacher_local_pca_major_scale!r}"
+                )
         else:
             self.teacher_local_pca_k = int(
                 loss_cfg.get(
@@ -309,6 +340,12 @@ class Trainer:
                 loss_cfg.get(
                     "teacher_local_pca_normalize_axes",
                     training_cfg.get("teacher_local_pca_normalize_axes", True),
+                )
+            )
+            self.teacher_local_pca_major_scale = float(
+                loss_cfg.get(
+                    "teacher_local_pca_major_scale",
+                    training_cfg.get("teacher_local_pca_major_scale", 1.0),
                 )
             )
         logger.info(
@@ -326,6 +363,7 @@ class Trainer:
             self.teacher_mode,
             (
                 f", teacher_local_pca_normalize_axes={self.teacher_local_pca_normalize_axes}"
+                f", teacher_local_pca_major_scale={self.teacher_local_pca_major_scale}"
                 if self.teacher_mode == "local_pca"
                 else ""
             ),
@@ -376,6 +414,7 @@ class Trainer:
             ellphi_differentiable=self.ellphi_differentiable,
             local_pca_k=self.teacher_local_pca_k,
             local_pca_normalize_axes=self.teacher_local_pca_normalize_axes,
+            local_pca_major_scale=self.teacher_local_pca_major_scale,
             max_points=self.topo_loss_max_points,
             need_clean_scales=(self.topo_scale_mode == "median"),
         )
@@ -522,7 +561,6 @@ class Trainer:
         avg_topo_loss = total_topo_loss / denom
         avg_aniso_loss = total_aniso_loss / denom
         avg_size_loss = total_size_loss / denom
-
         train_f1 = f1_score(all_train_labels, all_train_preds, zero_division=0)
         train_precision = precision_score(all_train_labels, all_train_preds, zero_division=0)
         train_recall = recall_score(all_train_labels, all_train_preds, zero_division=0)
@@ -624,7 +662,10 @@ class Trainer:
             raise RuntimeError(
                 "validate: w_topo>0 but topological loss was not computed for any batch"
             )
-        avg_topo_loss = total_topo_loss / topo_steps
+        # w_topo==0: topo path is intentionally skipped; report 0 (no silent NaN).
+        avg_topo_loss = (
+            total_topo_loss / topo_steps if topo_steps > 0 else 0.0
+        )
 
         recall = recall_score(all_labels, all_preds, zero_division=0)
         

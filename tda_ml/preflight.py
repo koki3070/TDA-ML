@@ -30,74 +30,119 @@ _KNOWN_TUNE_OBJECTIVES: dict[str, TuneObjectiveKind] = {
     "val_dbscan_mcc": "mcc",
 }
 
+PAPER_NO_CLS_BARRIER_ANISO_THRESHOLD = 6.0
+
+# Near-tangent outlier geometry (legacy opt-in path; not the paper main table).
+PAPER_NO_CLS_OUTLIER_CONTRACT: dict[str, Any] = {
+    "outlier_mode": "local_pca_tangent",
+    "tangent_pca_k": 10,
+    "tangent_offset_min": 0.15,
+    "tangent_offset_max": 0.40,
+    "tangent_angle_jitter_deg": 30.0,
+    "tangent_stroke_clearance": 0.08,
+    "tangent_direction": "tangent",
+}
+
 PAPER_NO_CLS_CONTRACT: dict[str, Any] = {
+    # MNIST Methods opt-in (near-tangent + H1). Matches
+    # methods_mnist_neartangent.
+    # Paper main table is RINGS_NO_CLS_CONTRACT (thin_rings), not this stack.
     "homology_dimensions": [1],
     "teacher_mode": "local_pca",
     "prob_weighting": False,
-    "aniso_mode": "elongate",
+    "aniso_mode": "elongate_barrier",
+    "aniso_barrier_threshold": PAPER_NO_CLS_BARRIER_ANISO_THRESHOLD,
     "distance_backend": "ellphi",
     "size_mode": "power",
     "w_class": 0.0,
     "teacher_local_pca_k": 10,
     "teacher_local_pca_normalize_axes": True,
+    # After unit normalization, scale major axes to the student/DBSCAN neighborhood
+    # band (~0.4). Unit teachers (major=1) inflate filtration and bias orientation.
+    "teacher_local_pca_major_scale": 0.4,
+    **PAPER_NO_CLS_OUTLIER_CONTRACT,
 }
 
-# Opt-in degeneracy-guard variant: identical stack, but the anisotropy loss is
-# ``elongate_barrier`` (elongate reward + quadratic barrier on aspect ratios
-# above the declared threshold). Motivated by near-tangent tuning where plain
-# ``elongate`` drove minor axes to ~1e-5 / aspect ~350 by epoch 15 and ellphi
-# tangency hard-failed on the needle geometry.
-PAPER_NO_CLS_BARRIER_ANISO_THRESHOLD = 6.0
-PAPER_NO_CLS_BARRIER_CONTRACT: dict[str, Any] = {
-    **PAPER_NO_CLS_CONTRACT,
+# Alias: barrier is the paper contract (kept for callers that still name it).
+PAPER_NO_CLS_BARRIER_CONTRACT: dict[str, Any] = PAPER_NO_CLS_CONTRACT
+
+# Ablation / legacy: same stack without the aspect ceiling (aniso_mode=elongate).
+PAPER_NO_CLS_ELONGATE_CONTRACT: dict[str, Any] = {
+    key: value
+    for key, value in PAPER_NO_CLS_CONTRACT.items()
+    if key not in ("aniso_mode", "aniso_barrier_threshold")
+} | {"aniso_mode": "elongate"}
+
+# Thin-rings paper contract: radial outliers, same loss stack as production YAML.
+RINGS_NO_CLS_OUTLIER_CONTRACT: dict[str, Any] = {
+    "dataset_type": "thin_rings",
+    "outlier_mode": "ring_radial",
+    "ring_count_min": 1,
+    "ring_count_max": 2,
+    "ring_radius_min": 0.25,
+    "ring_radius_max": 0.60,
+    "ring_center_box": 0.30,
+    "ring_outlier_offset_min": 0.03,
+    "ring_outlier_offset_max": 0.06,
+    "ring_outlier_clearance": 0.03,
+}
+
+RINGS_NO_CLS_CONTRACT: dict[str, Any] = {
+    "homology_dimensions": [0, 1],
+    "teacher_mode": "local_pca",
+    "prob_weighting": False,
     "aniso_mode": "elongate_barrier",
     "aniso_barrier_threshold": PAPER_NO_CLS_BARRIER_ANISO_THRESHOLD,
+    "distance_backend": "ellphi",
+    "size_mode": "power",
+    "w_class": 0.0,
+    "teacher_local_pca_k": 10,
+    "teacher_local_pca_normalize_axes": True,
+    # Data-intrinsic scale: median raw local-PCA major on rings val clean
+    # (seed=42, 500 clouds).
+    "teacher_local_pca_major_scale": 0.083,
+    **RINGS_NO_CLS_OUTLIER_CONTRACT,
 }
 
 _KNOWN_TEACHER_MODES = frozenset({"euclidean", "local_pca"})
 
 
-def assert_paper_no_cls_contract(config: dict[str, Any]) -> dict[str, Any]:
-    """Require a declared H1-only paper method variant; never infer missing fields.
-
-    Two declared variants exist, selected explicitly by ``loss.aniso_mode``:
-    ``elongate`` (original) and ``elongate_barrier`` (degeneracy guard, which
-    additionally requires ``loss.aniso_barrier_threshold``).
-    """
+def _assert_shared_no_cls_loss_fields(config: dict[str, Any], *, label: str) -> dict[str, Any]:
+    """Shared local_pca / power / barrier fields; homology value is contract-specific."""
     topo = (config.get("model") or {}).get("topology_loss") or {}
     loss = config.get("loss") or {}
     actual: dict[str, Any] = {}
 
     if "homology_dimensions" not in topo:
         raise ValueError(
-            "Paper no_cls config must explicitly define "
-            "model.topology_loss.homology_dimensions=[1]"
+            f"{label} config must explicitly define "
+            "model.topology_loss.homology_dimensions"
         )
     actual["homology_dimensions"] = list(topo["homology_dimensions"])
 
     if "teacher_mode" not in loss:
         raise ValueError(
-            "Paper no_cls config must explicitly define loss.teacher_mode='local_pca'"
+            f"{label} config must explicitly define loss.teacher_mode='local_pca'"
         )
     actual["teacher_mode"] = str(loss["teacher_mode"]).strip().lower()
 
     if "prob_weighting" not in topo:
         raise ValueError(
-            "Paper no_cls config must explicitly define "
+            f"{label} config must explicitly define "
             "model.topology_loss.prob_weighting=false"
         )
     actual["prob_weighting"] = bool(topo["prob_weighting"])
 
     if "aniso_mode" not in loss:
         raise ValueError(
-            "Paper no_cls config must explicitly define loss.aniso_mode "
-            "('elongate' or 'elongate_barrier')"
+            f"{label} config must explicitly define loss.aniso_mode "
+            "('elongate_barrier' contract, or 'elongate' ablation)"
         )
     actual["aniso_mode"] = str(loss["aniso_mode"]).strip().lower()
     if actual["aniso_mode"] == "elongate_barrier":
         if "aniso_barrier_threshold" not in loss:
             raise ValueError(
-                "Paper no_cls barrier variant must explicitly define "
+                f"{label} barrier variant must explicitly define "
                 "loss.aniso_barrier_threshold "
                 f"(declared value: {PAPER_NO_CLS_BARRIER_ANISO_THRESHOLD})"
             )
@@ -105,42 +150,80 @@ def assert_paper_no_cls_contract(config: dict[str, Any]) -> dict[str, Any]:
 
     if "distance_backend" not in topo:
         raise ValueError(
-            "Paper no_cls config must explicitly define "
+            f"{label} config must explicitly define "
             "model.topology_loss.distance_backend='ellphi'"
         )
     actual["distance_backend"] = str(topo["distance_backend"]).strip().lower()
 
     if "size_mode" not in loss:
         raise ValueError(
-            "Paper no_cls config must explicitly define loss.size_mode='power'"
+            f"{label} config must explicitly define loss.size_mode='power'"
         )
     actual["size_mode"] = str(loss["size_mode"]).strip().lower()
 
     if "w_class" not in loss:
         raise ValueError(
-            "Paper no_cls config must explicitly define loss.w_class=0.0"
+            f"{label} config must explicitly define loss.w_class=0.0"
         )
     actual["w_class"] = float(loss["w_class"])
 
     if "teacher_local_pca_k" not in loss:
         raise ValueError(
-            "Paper no_cls config must explicitly define loss.teacher_local_pca_k=10"
+            f"{label} config must explicitly define loss.teacher_local_pca_k=10"
         )
     actual["teacher_local_pca_k"] = int(loss["teacher_local_pca_k"])
 
     if "teacher_local_pca_normalize_axes" not in loss:
         raise ValueError(
-            "Paper no_cls config must explicitly define "
+            f"{label} config must explicitly define "
             "loss.teacher_local_pca_normalize_axes=true"
         )
     actual["teacher_local_pca_normalize_axes"] = bool(
         loss["teacher_local_pca_normalize_axes"]
     )
 
+    if "teacher_local_pca_major_scale" not in loss:
+        raise ValueError(
+            f"{label} config must explicitly define "
+            "loss.teacher_local_pca_major_scale "
+            "(rings: 0.083; MNIST Methods: 0.4)"
+        )
+    actual["teacher_local_pca_major_scale"] = float(
+        loss["teacher_local_pca_major_scale"]
+    )
+    return actual
+
+
+def assert_paper_no_cls_contract(config: dict[str, Any]) -> dict[str, Any]:
+    """Require the MNIST Methods near-tangent stack; never infer missing fields.
+
+    Two anisotropy variants exist, selected explicitly by ``loss.aniso_mode``:
+    ``elongate_barrier`` (Methods contract) and ``elongate`` (ablation without
+    aspect ceiling). Both require H1-only and near-tangent outlier geometry.
+    The barrier variant additionally requires ``loss.aniso_barrier_threshold``.
+    Paper main table uses ``assert_rings_no_cls_contract`` instead.
+    """
+    data = config.get("data") or {}
+    actual = _assert_shared_no_cls_loss_fields(config, label="Paper no_cls")
+
+    for key in PAPER_NO_CLS_OUTLIER_CONTRACT:
+        if key not in data:
+            raise ValueError(
+                f"Paper no_cls config must explicitly define data.{key} "
+                f"(near-tangent contract value: {PAPER_NO_CLS_OUTLIER_CONTRACT[key]!r})"
+            )
+    actual["outlier_mode"] = str(data["outlier_mode"]).strip().lower()
+    actual["tangent_pca_k"] = int(data["tangent_pca_k"])
+    actual["tangent_offset_min"] = float(data["tangent_offset_min"])
+    actual["tangent_offset_max"] = float(data["tangent_offset_max"])
+    actual["tangent_angle_jitter_deg"] = float(data["tangent_angle_jitter_deg"])
+    actual["tangent_stroke_clearance"] = float(data["tangent_stroke_clearance"])
+    actual["tangent_direction"] = str(data["tangent_direction"]).strip().lower()
+
     expected = (
-        PAPER_NO_CLS_BARRIER_CONTRACT
+        PAPER_NO_CLS_CONTRACT
         if actual.get("aniso_mode") == "elongate_barrier"
-        else PAPER_NO_CLS_CONTRACT
+        else PAPER_NO_CLS_ELONGATE_CONTRACT
     )
     if actual != expected:
         raise ValueError(
@@ -148,6 +231,60 @@ def assert_paper_no_cls_contract(config: dict[str, Any]) -> dict[str, Any]:
             f"expected={expected}, actual={actual}"
         )
     return actual
+
+
+def assert_rings_no_cls_contract(config: dict[str, Any]) -> dict[str, Any]:
+    """Require the thin-rings Methods contract (radial outliers; not MNIST main table)."""
+    data = config.get("data") or {}
+    actual = _assert_shared_no_cls_loss_fields(config, label="Rings no_cls")
+
+    if actual.get("aniso_mode") != "elongate_barrier":
+        raise ValueError(
+            "Rings no_cls contract requires loss.aniso_mode='elongate_barrier' "
+            f"(got {actual.get('aniso_mode')!r})"
+        )
+
+    for key in RINGS_NO_CLS_OUTLIER_CONTRACT:
+        if key not in data:
+            raise ValueError(
+                f"Rings no_cls config must explicitly define data.{key} "
+                f"(rings contract value: {RINGS_NO_CLS_OUTLIER_CONTRACT[key]!r})"
+            )
+    actual["dataset_type"] = str(data["dataset_type"]).strip().lower()
+    actual["outlier_mode"] = str(data["outlier_mode"]).strip().lower()
+    actual["ring_count_min"] = int(data["ring_count_min"])
+    actual["ring_count_max"] = int(data["ring_count_max"])
+    actual["ring_radius_min"] = float(data["ring_radius_min"])
+    actual["ring_radius_max"] = float(data["ring_radius_max"])
+    actual["ring_center_box"] = float(data["ring_center_box"])
+    actual["ring_outlier_offset_min"] = float(data["ring_outlier_offset_min"])
+    actual["ring_outlier_offset_max"] = float(data["ring_outlier_offset_max"])
+    actual["ring_outlier_clearance"] = float(data["ring_outlier_clearance"])
+
+    if actual != RINGS_NO_CLS_CONTRACT:
+        raise ValueError(
+            "Rings no_cls contract mismatch: "
+            f"expected={RINGS_NO_CLS_CONTRACT}, actual={actual}"
+        )
+    return actual
+
+
+def resolve_experiment_contract(config: dict[str, Any]) -> dict[str, Any]:
+    """Select MNIST paper vs rings Methods contract from ``data.dataset_type``."""
+    data = config.get("data") or {}
+    dataset_type = str(data.get("dataset_type", "")).strip().lower()
+    if not dataset_type:
+        raise ValueError(
+            "data.dataset_type must be set explicitly (mnist|thin_rings); "
+            "refusing silent default when resolving experiment contract"
+        )
+    if dataset_type == "thin_rings":
+        return assert_rings_no_cls_contract(config)
+    if dataset_type == "mnist":
+        return assert_paper_no_cls_contract(config)
+    raise ValueError(
+        f"data.dataset_type must be 'mnist' or 'thin_rings', got {dataset_type!r}"
+    )
 
 
 def paper_aniso_fields(config: dict[str, Any]) -> dict[str, Any]:
@@ -299,7 +436,13 @@ def preflight_training_config(
     else:
         impl = backend
 
-    dtype = str((config.get("data") or {}).get("dataset_type", "mnist")).lower().strip()
+    data_cfg = config.get("data") or {}
+    if "dataset_type" not in data_cfg:
+        raise ValueError(
+            "data.dataset_type must be set explicitly (mnist|thin_rings); "
+            "refusing silent 'mnist' default in preflight"
+        )
+    dtype = str(data_cfg["dataset_type"]).lower().strip()
     if dtype == "mnist":
         if not data_path.is_dir():
             raise FileNotFoundError(
@@ -367,13 +510,14 @@ def preflight_tune_json(
         missing = [key for key in expected_contract if key not in payload]
         if missing:
             raise ValueError(
-                f"Tune JSON predates the declared paper contract; missing {missing}: "
-                f"{tune_json}. Re-tune with the H1-only stack."
+                f"Tune JSON predates the declared experiment contract; missing {missing}: "
+                f"{tune_json}. Re-tune with the matching Methods stack "
+                "(MNIST near-tangent H1 or thin-rings H0+H1)."
             )
         actual_contract = {key: payload[key] for key in expected_contract}
         if actual_contract != expected_contract:
             raise ValueError(
-                "Tune JSON paper contract does not match the production config: "
+                "Tune JSON experiment contract does not match the production config: "
                 f"expected={expected_contract}, actual={actual_contract}: {tune_json}"
             )
     payload["_objective_kind"] = kind
@@ -397,7 +541,7 @@ def preflight_tune_study(
         cfg = load_config(base_config, project_root=root)
         if config_overrides:
             cfg = deep_update(cfg, config_overrides)
-        contract = assert_paper_no_cls_contract(cfg)
+        contract = resolve_experiment_contract(cfg)
         dbscan_grid_from_config(cfg)
         preview = preflight_training_config(cfg, project_root=root)
     except Exception as exc:
@@ -479,7 +623,7 @@ def preflight_tune_production_run(
         cfg = load_config(base_config, project_root=root)
         if config_overrides:
             cfg = deep_update(cfg, config_overrides)
-        contract = assert_paper_no_cls_contract(cfg)
+        contract = resolve_experiment_contract(cfg)
         tune_payload = preflight_tune_json(
             tune_json,
             expected_contract=contract,

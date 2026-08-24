@@ -1,9 +1,10 @@
 # Methods opt-in (not paper main table): MNIST near-tangent + H1 + elongate_barrier.
-# Passes PAPER_NO_CLS_BARRIER_CONTRACT. Opt-in via BASE_CONFIG=methods_mnist_neartangent.
-# Copy this file to retune on another geometry; never an implicit swap for paper 30ep.
+# Passes PAPER_NO_CLS_CONTRACT. Does NOT pass RINGS_NO_CLS_CONTRACT.
+# Opt-in via BASE_CONFIG=methods_mnist_neartangent ; never an implicit swap for
+# rings paper 30ep. Copy this file to retune on another geometry.
 #
-# Why barrier: plain elongate can collapse minor axes until ellphi tangency
-# hard-fails; barrier keeps aspect <= T=6.0.
+# Why barrier: on near-tangent data, plain `elongate` can collapse minor axes
+# until ellphi tangency hard-fails; barrier keeps aspect <= T=6.0.
 
 meta:
   config_id: "methods_mnist_neartangent"
@@ -34,6 +35,7 @@ loss:
   teacher_mode: local_pca
   teacher_local_pca_k: 10
   teacher_local_pca_normalize_axes: true
+  teacher_local_pca_major_scale: 0.4
   topo_eps_scale: 1.0
   topo_scale_mode: fixed
 

@@ -1,4 +1,4 @@
-"""Thin synthetic rings with normal-direction (radial) outliers.
+"""Thin synthetic rings with radial or chord-bridge outliers.
 
 Motivation (2026-07-19, docs/experiments/20260719_neartangent_barrier.md):
 on MNIST 100-point clouds the local-PCA teacher ellipses are only mildly
@@ -10,7 +10,13 @@ the minimal geometry where the anisotropy hypothesis is structurally testable:
   ellipses reach aspect ~8-9;
 - radial outliers sit within ~1 nearest-neighbour spacing of the ring
   (Euclidean-ambiguous) but cross the ellipse minor axis (Mahalanobis-clear);
-- rings are H1 loops, matching the H1-only paper pipeline.
+- rings are H1 loops; paper persistence includes H0 and H1.
+
+``outlier_mode``:
+
+- ``ring_radial`` — offsets along the ring normal (paper Methods).
+- ``ring_bridge`` — interior chord / shortcut points that can kill H1 early
+  in a filtration while remaining locally assignable to rim LPCA via NN.
 
 Interface mirrors :class:`tda_ml.data_loader.NoisyMNISTDataset`: items are
 ``(data, labels, clean_pc)`` with ``data`` of shape
@@ -34,10 +40,11 @@ from tda_ml.cloud_separation import apply_noise_with_min_separation
 from tda_ml.numerical_eps import MIN_ELLPHI_CENTER_SEPARATION
 
 TEST_INDEX_OFFSET = 1_000_000
+RING_OUTLIER_MODES = frozenset({"ring_radial", "ring_bridge"})
 
 
 class ThinRingsDataset(Dataset):
-    """1-2 thin rings per cloud + radial (normal-direction) outliers.
+    """1-2 thin rings per cloud + radial or chord-bridge outliers.
 
     All geometry parameters are required explicitly (no silent defaults) in
     line with the repo reproducibility policy; callers wire them from
@@ -59,6 +66,9 @@ class ThinRingsDataset(Dataset):
         ring_outlier_offset_min: float,
         ring_outlier_offset_max: float,
         ring_outlier_clearance: float,
+        outlier_mode: str = "ring_radial",
+        ring_bridge_gap_min: float | None = None,
+        ring_bridge_gap_max: float | None = None,
         noise_seed: int = 0,
         index_offset: int = 0,
         min_separation: float = MIN_ELLPHI_CENTER_SEPARATION,
@@ -93,17 +103,43 @@ class ThinRingsDataset(Dataset):
             raise ValueError(
                 f"ring_outlier_clearance must be >= 0; got {ring_outlier_clearance}"
             )
-        if ring_outlier_clearance > ring_outlier_offset_min:
+        mode = str(outlier_mode).strip().lower()
+        if mode not in RING_OUTLIER_MODES:
+            raise ValueError(
+                f"outlier_mode must be one of {sorted(RING_OUTLIER_MODES)}, got {outlier_mode!r}"
+            )
+        self.outlier_mode = mode
+        if mode == "ring_radial" and ring_outlier_clearance > ring_outlier_offset_min:
             raise ValueError(
                 "ring_outlier_clearance must be <= ring_outlier_offset_min, otherwise "
                 "every candidate is rejected against its own source ring; got "
                 f"{ring_outlier_clearance} > {ring_outlier_offset_min}"
             )
-        extent = ring_radius_max + ring_center_box + ring_outlier_offset_max
+        if mode == "ring_bridge":
+            if ring_bridge_gap_min is None or ring_bridge_gap_max is None:
+                raise ValueError(
+                    "ring_bridge_gap_min and ring_bridge_gap_max must be set "
+                    "explicitly for outlier_mode='ring_bridge'"
+                )
+            gap_min = float(ring_bridge_gap_min)
+            gap_max = float(ring_bridge_gap_max)
+            if not (0.0 < gap_min <= gap_max < 2.0 * math.pi):
+                raise ValueError(
+                    "Require 0 < ring_bridge_gap_min <= ring_bridge_gap_max < 2π; "
+                    f"got {gap_min}, {gap_max}"
+                )
+            self.ring_bridge_gap_min = gap_min
+            self.ring_bridge_gap_max = gap_max
+        else:
+            self.ring_bridge_gap_min = None
+            self.ring_bridge_gap_max = None
+        extent = ring_radius_max + ring_center_box + (
+            ring_outlier_offset_max if mode == "ring_radial" else 0.0
+        )
         if extent > 1.0:
             raise ValueError(
                 "ring geometry can leave [-1, 1]^2: "
-                f"radius_max + center_box + outlier_offset_max = {extent:.3f} > 1.0"
+                f"extent={extent:.3f} > 1.0 (mode={mode})"
             )
         if min_separation < 0:
             raise ValueError(f"min_separation must be >= 0; got {min_separation}")
@@ -235,6 +271,83 @@ class ThinRingsDataset(Dataset):
                 )
         return outliers
 
+    def _candidate_cleared(
+        self,
+        cand: torch.Tensor,
+        *,
+        centers: list[torch.Tensor],
+        radii: list[float],
+        inliers: torch.Tensor,
+        outliers: torch.Tensor,
+        n_out_placed: int,
+    ) -> bool:
+        if not bool(torch.all((cand >= -1.0) & (cand <= 1.0)).item()):
+            return False
+        for c_r, r_r in zip(centers, radii):
+            band = abs(float(torch.linalg.norm(cand - c_r)) - r_r)
+            if band < self.ring_outlier_clearance:
+                return False
+        if self.min_separation > 0:
+            d = torch.linalg.norm(inliers - cand, dim=-1).min()
+            if bool((d < self.min_separation).item()):
+                return False
+            if n_out_placed > 0:
+                d_out = torch.linalg.norm(outliers[:n_out_placed] - cand, dim=-1).min()
+                if bool((d_out < self.min_separation).item()):
+                    return False
+        return True
+
+    def _sample_bridge_outliers(
+        self,
+        rng: torch.Generator,
+        centers: list[torch.Tensor],
+        radii: list[float],
+        inliers: torch.Tensor,
+    ) -> torch.Tensor:
+        """Interior chord points spanning a random angular gap (H1 shortcuts)."""
+        assert self.ring_bridge_gap_min is not None
+        assert self.ring_bridge_gap_max is not None
+        outliers = torch.empty(self.num_outliers, 2)
+        n_rings = len(centers)
+        for j in range(self.num_outliers):
+            for _ in range(self.max_attempts):
+                r_idx = int(torch.randint(0, n_rings, (1,), generator=rng))
+                c = centers[r_idx]
+                radius = float(radii[r_idx])
+                theta0 = float(torch.rand(1, generator=rng)) * 2.0 * math.pi
+                gap = self.ring_bridge_gap_min + (
+                    self.ring_bridge_gap_max - self.ring_bridge_gap_min
+                ) * float(torch.rand(1, generator=rng))
+                theta1 = theta0 + gap
+                p0 = c + radius * torch.tensor(
+                    [math.cos(theta0), math.sin(theta0)], dtype=c.dtype
+                )
+                p1 = c + radius * torch.tensor(
+                    [math.cos(theta1), math.sin(theta1)], dtype=c.dtype
+                )
+                # Stay away from the rim endpoints (t near 0/1 looks radial-local).
+                t = 0.25 + 0.5 * float(torch.rand(1, generator=rng))
+                cand = (1.0 - t) * p0 + t * p1
+                if self._candidate_cleared(
+                    cand,
+                    centers=centers,
+                    radii=radii,
+                    inliers=inliers,
+                    outliers=outliers,
+                    n_out_placed=j,
+                ):
+                    outliers[j] = cand
+                    break
+            else:
+                raise RuntimeError(
+                    "Failed to sample a ring-cleared bridge outlier after "
+                    f"{self.max_attempts} attempts (outlier_index={j}, "
+                    f"gap=[{self.ring_bridge_gap_min}, {self.ring_bridge_gap_max}], "
+                    f"clearance={self.ring_outlier_clearance}, "
+                    f"min_separation={self.min_separation})."
+                )
+        return outliers
+
     def __getitem__(self, idx: int):
         if not (0 <= idx < self.num_samples):
             raise IndexError(idx)
@@ -245,9 +358,12 @@ class ThinRingsDataset(Dataset):
         inliers = apply_noise_with_min_separation(clean, self.noise_std, generator=rng)
 
         if self.num_outliers > 0:
-            outliers = self._sample_radial_outliers(
-                rng, clean, ring_of, centers, radii, inliers
-            )
+            if self.outlier_mode == "ring_radial":
+                outliers = self._sample_radial_outliers(
+                    rng, clean, ring_of, centers, radii, inliers
+                )
+            else:
+                outliers = self._sample_bridge_outliers(rng, centers, radii, inliers)
         else:
             outliers = torch.empty(0, 2)
 
@@ -257,7 +373,7 @@ class ThinRingsDataset(Dataset):
         data[: self.max_points] = inliers
         labels[: self.max_points] = 0
         if self.num_outliers > 0:
-            data[self.max_points:] = outliers
+            data[self.max_points :] = outliers
 
         perm = torch.randperm(total, generator=rng)
         data = data[perm]
@@ -287,7 +403,18 @@ def ring_kwargs_from_config(data_cfg: dict) -> dict:
             raise ValueError(
                 f"data.{key} must be set explicitly for dataset_type=thin_rings"
             )
-    return dict(
+    if "outlier_mode" not in data_cfg:
+        raise ValueError(
+            "data.outlier_mode must be set explicitly for dataset_type=thin_rings "
+            f"(one of {sorted(RING_OUTLIER_MODES)})"
+        )
+    mode = str(data_cfg["outlier_mode"]).strip().lower()
+    if mode not in RING_OUTLIER_MODES:
+        raise ValueError(
+            f"data.outlier_mode must be one of {sorted(RING_OUTLIER_MODES)}, got {mode!r}"
+        )
+    out = dict(
+        outlier_mode=mode,
         ring_count_min=int(data_cfg["ring_count_min"]),
         ring_count_max=int(data_cfg["ring_count_max"]),
         ring_radius_min=float(data_cfg["ring_radius_min"]),
@@ -297,3 +424,12 @@ def ring_kwargs_from_config(data_cfg: dict) -> dict:
         ring_outlier_offset_max=float(data_cfg["ring_outlier_offset_max"]),
         ring_outlier_clearance=float(data_cfg["ring_outlier_clearance"]),
     )
+    if mode == "ring_bridge":
+        for key in ("ring_bridge_gap_min", "ring_bridge_gap_max"):
+            if key not in data_cfg:
+                raise ValueError(
+                    f"data.{key} must be set explicitly for outlier_mode='ring_bridge'"
+                )
+        out["ring_bridge_gap_min"] = float(data_cfg["ring_bridge_gap_min"])
+        out["ring_bridge_gap_max"] = float(data_cfg["ring_bridge_gap_max"])
+    return out

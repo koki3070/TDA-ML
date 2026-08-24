@@ -3,7 +3,7 @@
 Paper-aligned baseline evaluation.
 
 Same data split as ``eval_paper.py`` under the paper
-config (typically ``paper_mnist_h1``), seeds
+config (typically ``paper_rings``), seeds
 42 / 123 / 456 / 789 / 1024: tune hyperparameters on validation clouds, report
 MCC / G-Mean on test. Topo W-Dist is computed for diagnostics only and is
 **not** a main-table column.
@@ -18,7 +18,7 @@ Methods:
 Usage::
 
     uv run python experiments/eval_baselines.py \\
-        --base-config paper_mnist_h1 \\
+        --base-config paper_rings \\
         --out-dir outputs/paper_baselines
 """
 
@@ -466,7 +466,7 @@ METHOD_ORDER = [
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     # No implicit default: the n100 paper comparison must pass the paper config
-    # (e.g. paper_mnist_h1); baselines share its
+    # (e.g. paper_rings); baselines share its
     # data settings and evaluation.dbscan / evaluation.baselines grids.
     p.add_argument("--base-config", type=str, required=True)
     p.add_argument("--out-dir", type=Path, default=REPO_ROOT / "outputs" / "paper_baselines")

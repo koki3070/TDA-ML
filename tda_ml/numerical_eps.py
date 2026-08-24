@@ -25,6 +25,10 @@ INLIER_PROB_MIN = 1e-4
 # modeling floor on physical coordinates.
 ZERO_PAD_ABS_SUM = 1e-6
 
+# Relative axis gap below which an ellipse is treated as circular (no unique
+# major-axis direction). Recorded in the run manifest as a declared constant.
+ORIENTATION_MIN_AXIS_GAP = 1e-3
+
 # Minimum pairwise center separation for ellphi-compatible clouds.
 # Two nearly coincident cloud points make the ellphi tangency derivative w.r.t.
 # the ellipse center (mu) numerically undefined; samplers reject candidates

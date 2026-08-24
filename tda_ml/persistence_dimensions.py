@@ -11,12 +11,12 @@ SUPPORTED_HOMOLOGY_DIMENSIONS = (0, 1)
 def normalize_homology_dimensions(value: Iterable[int]) -> tuple[int, ...]:
     """Validate an explicit subset of the currently supported dimensions.
 
-    Missing / ``None`` hard-fails: never infer H0+H1.
+    Missing / ``None`` hard-fails: never infer a default homology set.
     """
     if value is None:
         raise ValueError(
             "homology_dimensions must be set explicitly; "
-            "refusing silent default to H0+H1"
+            "refusing silent default"
         )
     dimensions = tuple(int(dim) for dim in value)
     if not dimensions:

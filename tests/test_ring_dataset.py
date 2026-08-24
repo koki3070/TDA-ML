@@ -14,6 +14,7 @@ RING_KW = dict(
     max_points=100,
     num_outliers=20,
     noise_std=0.005,
+    outlier_mode="ring_radial",
     ring_count_min=1,
     ring_count_max=2,
     ring_radius_min=0.25,
@@ -90,11 +91,36 @@ class TestThinRingsDataset(unittest.TestCase):
             ThinRingsDataset(2, **bad)
 
     def test_ring_kwargs_from_config_requires_all_keys(self):
-        cfg = {k: v for k, v in RING_KW.items() if k.startswith("ring_")}
+        cfg = {k: v for k, v in RING_KW.items() if k.startswith("ring_") or k == "outlier_mode"}
         self.assertEqual(ring_kwargs_from_config(cfg)["ring_count_max"], 2)
         del cfg["ring_outlier_clearance"]
         with self.assertRaises(ValueError):
             ring_kwargs_from_config(cfg)
+
+    def test_bridge_outliers_interior(self):
+        kw = dict(RING_KW)
+        kw.update(
+            outlier_mode="ring_bridge",
+            ring_count_min=1,
+            ring_count_max=1,
+            ring_bridge_gap_min=1.2,
+            ring_bridge_gap_max=2.0,
+            ring_outlier_clearance=0.04,
+            ring_outlier_offset_min=0.04,
+            ring_outlier_offset_max=0.08,
+        )
+        ds = ThinRingsDataset(4, noise_seed=11, **kw)
+        for i in range(4):
+            data, labels, clean = ds[i]
+            out = data[labels == 1]
+            # Bridges must stay off the clean rim band.
+            d = torch.cdist(out, clean).min(dim=1).values
+            self.assertGreaterEqual(float(d.min()), 0.035)
+            # And lie inside the convex hull scale of the clean ring (interior).
+            c = clean.mean(dim=0)
+            r_clean = torch.linalg.norm(clean - c, dim=-1).median()
+            r_out = torch.linalg.norm(out - c, dim=-1)
+            self.assertTrue(bool((r_out < r_clean - 0.02).all().item()))
 
 
 if __name__ == "__main__":

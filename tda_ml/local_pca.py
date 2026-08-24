@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import torch
 
 from tda_ml.numerical_eps import EIGENVALUE_FLOOR, PCA_RIDGE_EPS
@@ -26,6 +28,7 @@ def local_pca_ellipse_params(
     *,
     k: int = 10,
     normalize_axes: bool = True,
+    major_scale: float = 1.0,
 ) -> torch.Tensor:
     """
     Ideal ellipse parameters from local PCA only (no learned corrections).
@@ -35,13 +38,23 @@ def local_pca_ellipse_params(
         k: number of Euclidean nearest neighbors (including self in the k-ball).
         normalize_axes: if True, divide by the major semi-axis so ``a=1`` (aspect ratio
             only). If False, use raw ``sqrt(eigenvalue)`` semi-axes ``(sqrt(l1), sqrt(l2))``.
+        major_scale: positive multiplier applied after normalization/raw axes.
+            Paper no_cls uses ``0.4`` so teacher major axes match the student /
+            DBSCAN neighborhood scale (unit-normalized teachers are too large).
 
     Returns:
         ``(..., N, 3)`` with ``[a, b, theta]`` per point.
     """
+    scale = float(major_scale)
+    if not math.isfinite(scale) or scale <= 0.0:
+        raise ValueError(f"major_scale must be a finite positive float, got {major_scale!r}")
+
     if points.ndim == 2:
         return local_pca_ellipse_params(
-            points.unsqueeze(0), k=k, normalize_axes=normalize_axes
+            points.unsqueeze(0),
+            k=k,
+            normalize_axes=normalize_axes,
+            major_scale=scale,
         ).squeeze(0)
 
     if points.ndim != 3 or points.shape[-1] != 2:
@@ -80,5 +93,7 @@ def local_pca_ellipse_params(
         base_axes = base_axes / (
             base_axes.max(dim=-1, keepdim=True)[0] + EIGENVALUE_FLOOR
         )
+    if scale != 1.0:
+        base_axes = base_axes * scale
 
     return torch.cat([base_axes, base_angle.unsqueeze(-1)], dim=-1).to(dtype=points.dtype)

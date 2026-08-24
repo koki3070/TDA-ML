@@ -41,7 +41,7 @@ model:
     # (see evaluation.dbscan.backend below).
     distance_backend: "ellphi"
     ellphi_differentiable: true
-    # Shared profiles use H0+H1; paper no_cls YAML sets [1] (H1-only).
+    # Shared profiles use H0+H1. Paper rings YAML restates [0, 1].
     homology_dimensions: [0, 1]
     # ellphi does not implement outlier-prob weighting.
     prob_weighting: false

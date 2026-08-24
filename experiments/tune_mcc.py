@@ -37,7 +37,8 @@ from tda_ml.checkpoint_io import resolve_val_topo_checkpoint
 from tda_ml.config import deep_update, load_config
 from tda_ml.dbscan_eval import evaluate_model_grid
 from tda_ml.main import main as train_main
-from tda_ml.preflight import paper_aniso_fields, preflight_mcc_tune_study
+from tda_ml.preflight import paper_aniso_fields, preflight_mcc_tune_study, resolve_experiment_contract
+from tda_ml.val_topo_cliff import ValTopoCliffError, cliff_max_from_config
 from tda_ml.reproducibility import reproducibility_settings, write_json
 from tda_ml.supervised_diagnostics import git_revision
 from tda_ml.topo_wdist import topo_wdist_options_from_config
@@ -53,11 +54,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CHECKPOINT_POLICY = "val_topo_best"
 SAVE_EVERY = 1
 
-# Recover-informed narrow search (log-uniform).
-W_TOPO_RANGE = (0.05, 0.25)
-W_SIZE_RANGE = (0.1, 0.6)
-W_ANISO_RANGE = (0.03, 0.15)
-LR_RANGE = (1e-4, 5e-4)
+# Same orientation-constrained band as tune_wdist (rings H0+H1 + major_scale=0.083).
+W_TOPO_RANGE = (0.008, 0.045)
+W_SIZE_RANGE = (0.10, 0.40)
+W_ANISO_RANGE = (0.05, 0.15)
+LR_RANGE = (1.2e-4, 3.0e-4)
 SIZE_REF_RANGE = (0.8, 1.6)
 SIZE_POWER_RANGE = (1.0, 2.0)
 
@@ -78,6 +79,9 @@ def build_trial_config(
     size_power: float,
 ) -> dict[str, Any]:
     cfg = load_config(base_config, project_root=REPO_ROOT)
+    homology_dimensions = list(
+        resolve_experiment_contract(cfg)["homology_dimensions"]
+    )
     overrides = {
         "meta": {"config_id": f"tune_mcc_t{trial_number:03d}", "run_slug": f"t{trial_number:03d}"},
         "loss": {
@@ -100,8 +104,9 @@ def build_trial_config(
             "topology_loss": {
                 "distance_backend": backend,
                 "prob_weighting": False,
-                # Mirror paper contract / STUDY_PREFLIGHT overrides onto every trial.
-                "homology_dimensions": [1],
+                # Stamp the resolved experiment contract (rings H0+H1 on the
+                # paper tune path). Divergent YAML homology hard-fails above.
+                "homology_dimensions": homology_dimensions,
             }
         },
         "outputs": {"base_dir": out_base, "save_every": SAVE_EVERY},
@@ -153,10 +158,19 @@ def make_objective(args: argparse.Namespace):
                 "dbscan_backend": args.dbscan_backend,
             },
         )
-        result = train_main(config=cfg)
+        try:
+            result = train_main(config=cfg)
+        except ValTopoCliffError as exc:
+            trial.set_user_attr("val_topo_cliff_passed", False)
+            trial.set_user_attr("val_topo_cliff_error", str(exc))
+            raise optuna.TrialPruned(str(exc)) from exc
         run_dir = Path(result["run_dir"])
 
         ckpt_name, ckpt_epoch, val_topo = resolve_val_topo_checkpoint(run_dir)
+        cliff_max = cliff_max_from_config(cfg)
+        if cliff_max is not None:
+            trial.set_user_attr("val_topo_cliff_max", cliff_max)
+            trial.set_user_attr("val_topo_cliff_passed", True)
         topo_options = topo_wdist_options_from_config(cfg)
         model = load_model_from_run(run_dir, cfg, device)
         loader = build_split_loader(cfg, "val", device)
@@ -200,8 +214,7 @@ def make_objective(args: argparse.Namespace):
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
-    # No implicit default: every study must state its config surface explicitly
-    # (power stack uses tune_mnist_h1).
+    # No implicit default: every study must state its config surface explicitly.
     p.add_argument("--base-config", type=str, required=True)
     p.add_argument("--n-trials", type=int, default=24)
     p.add_argument(
@@ -248,6 +261,9 @@ def main() -> int:
     args = parse_args()
     Path(args.out_base).mkdir(parents=True, exist_ok=True)
     base_cfg_for_aniso = load_config(args.base_config, project_root=REPO_ROOT)
+    homology_dimensions = list(
+        resolve_experiment_contract(base_cfg_for_aniso)["homology_dimensions"]
+    )
     preflight = preflight_mcc_tune_study(
         base_config=args.base_config,
         project_root=REPO_ROOT,
@@ -257,7 +273,7 @@ def main() -> int:
                 "topology_loss": {
                     "distance_backend": args.backend,
                     "prob_weighting": False,
-                    "homology_dimensions": [1],
+                    "homology_dimensions": homology_dimensions,
                 }
             },
             "loss": {
@@ -313,7 +329,18 @@ def main() -> int:
         print(f"[worker done] completed trials in study so far: {n_done}")
         return 0
 
-    best = study.best_trial
+    complete = [
+        t
+        for t in study.trials
+        if t.state == TrialState.COMPLETE and t.value is not None
+    ]
+    if not complete:
+        raise RuntimeError(
+            f"No COMPLETE Optuna trials in study {args.study_name!r}; cannot write best. "
+            "If require_val_topo_cliff is enabled, all trials may have been pruned "
+            "for missing the val_topo phase transition — lengthen --tune-epochs / expand search."
+        )
+    best = max(complete, key=lambda t: float(t.value))
     payload = {
         "objective": "val_dbscan_mcc_max_at_val_topo_best_ckpt",
         "objective_kind": "mcc",

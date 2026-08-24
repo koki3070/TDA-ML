@@ -135,6 +135,11 @@ class TestTrainer(unittest.TestCase):
         self.assertFalse(cls_changed, "classification head should be frozen when w_class=0")
         self.assertTrue(topo_changed, "topology head should still update when w_class=0")
 
+    def test_missing_pos_weight_hard_fails(self):
+        del self.config["loss"]["pos_weight"]
+        with self.assertRaisesRegex(ValueError, "loss.pos_weight must be set explicitly"):
+            Trainer(self.model, self.config, self.device)
+
     def test_single_axis_size_override_hard_fails(self):
         self.config["training"]["lambda_major"] = 0.2
         with self.assertRaisesRegex(ValueError, "lambda_major and training.lambda_minor"):

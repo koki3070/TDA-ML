@@ -211,6 +211,7 @@ __marimo__/
 outputs/
 docs/
 configs/archive/
+scratch/
 docs/JSAIM2026UT/
 docs/paper/
 docs/experiments/
@@ -219,6 +220,9 @@ trash/
 ellphi_repo/
 pytorch-topological
 docs/JSAIM2026UT.zip
+
+# Generated figure assets (not source).
+figures/
 
 # OS artifacts
 .DS_Store
