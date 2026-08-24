@@ -4,7 +4,10 @@
 Exit codes:
   0 — matching metrics exist (safe to skip)
   1 — no metrics (must run)
-  2 — stale / ambiguous / corrupt (hard-fail; do not skip and do not silently reuse)
+  2 — hard-fail: stale / ambiguous / corrupt / leftover ``pwr_s*`` namespace,
+      or any inspection error. Do not skip and do not start a new run.
+      Exit 1 is reserved for genuine missing ``paper_s*`` metrics so the
+      30ep driver never treats a refused legacy tree as "missing".
 """
 
 from __future__ import annotations
@@ -97,12 +100,19 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    status, paths = inspect_seed_metrics(
-        out_base=args.out_base,
-        seed=args.seed,
-        tag=args.tag,
-        tune_json=args.tune_json,
-    )
+    try:
+        status, paths = inspect_seed_metrics(
+            out_base=args.out_base,
+            seed=args.seed,
+            tag=args.tag,
+            tune_json=args.tune_json,
+        )
+    except Exception as exc:
+        # Fail closed. The 30ep driver treats exit 1 as "missing, start training".
+        # Legacy pwr_s* (RuntimeError), IO/JSON errors, and mixed namespaces must
+        # not share that code.
+        print(f"error: freshness check failed: {exc}", file=sys.stderr)
+        return 2
     if status == "fresh":
         print(f"[fresh] seed={args.seed} metrics={paths[0]}")
         return 0

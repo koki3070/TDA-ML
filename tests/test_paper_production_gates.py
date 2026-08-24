@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -194,6 +195,96 @@ class TestFreshness(unittest.TestCase):
                     tune_json=Path(tmp) / "best.json",
                     expected_revision="deadbeef",
                 )
+
+
+class TestFreshnessCLI(unittest.TestCase):
+    """The 30ep driver keys off CLI exit codes: 1 = run, 2 = refuse."""
+
+    def _run_cli(self, out_base: Path, *, seed: int = 42, tag: str = "wdist",
+                 tune_json: Path | None = None) -> subprocess.CompletedProcess[str]:
+        if tune_json is None:
+            tune_json = out_base / "best.json"
+        return subprocess.run(
+            [
+                sys.executable,
+                str(REPO / "experiments" / "paper_run_freshness.py"),
+                "--out-base",
+                str(out_base),
+                "--seed",
+                str(seed),
+                "--tag",
+                tag,
+                "--tune-json",
+                str(tune_json),
+            ],
+            cwd=str(REPO),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_cli_missing_exits_1(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            proc = self._run_cli(root)
+            self.assertEqual(proc.returncode, 1, proc.stderr)
+            self.assertIn("[missing]", proc.stdout)
+
+    def test_cli_legacy_pwr_exits_2_not_1(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pwr_s42_old" / "logs").mkdir(parents=True)
+            proc = self._run_cli(root)
+            self.assertEqual(proc.returncode, 2, proc.stderr)
+            self.assertIn("Legacy pwr_s", proc.stderr)
+
+    def test_cli_mixed_namespace_exits_2_not_1(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pwr_s42_old" / "logs").mkdir(parents=True)
+            (root / "paper_s42_new" / "logs").mkdir(parents=True)
+            proc = self._run_cli(root)
+            self.assertEqual(proc.returncode, 2, proc.stderr)
+            self.assertIn("Mixed legacy", proc.stderr)
+
+    def test_cli_stale_revision_exits_2(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tune = root / "best.json"
+            tune.write_text("{}", encoding="utf-8")
+            logs = root / "paper_s42_x" / "logs"
+            logs.mkdir(parents=True)
+            (logs / "run_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "seed": 42,
+                        "tune_json": str(tune.resolve()),
+                        "source_revision": "oldrev",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (logs / "paper_metrics_test_wdist.json").write_text(
+                "{}", encoding="utf-8"
+            )
+            proc = self._run_cli(root, tune_json=tune)
+            self.assertEqual(proc.returncode, 2, proc.stderr)
+            self.assertIn("stale", proc.stderr)
+
+    def test_cli_corrupt_manifest_exits_2_not_1(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tune = root / "best.json"
+            tune.write_text("{}", encoding="utf-8")
+            logs = root / "paper_s42_x" / "logs"
+            logs.mkdir(parents=True)
+            (logs / "run_manifest.json").write_text("{not-json", encoding="utf-8")
+            (logs / "paper_metrics_test_wdist.json").write_text(
+                "{}", encoding="utf-8"
+            )
+            proc = self._run_cli(root, tune_json=tune)
+            self.assertEqual(proc.returncode, 2, proc.stderr)
+            self.assertNotEqual(proc.returncode, 1)
 
 
 class TestLegacyNamespaceHelper(unittest.TestCase):
