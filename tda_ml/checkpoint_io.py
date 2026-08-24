@@ -2,27 +2,18 @@
 
 Training checkpoints are ``pickle``-based. Prefer ``weights_only=True`` when the
 installed PyTorch supports it so arbitrary bytecode from untrusted ``.pth``
-files is not executed. If the file contains unsupported metadata (some legacy
-saves), loading retries once with ``weights_only=False`` and emits a warning —
-use that path only for files you trust.
+files is not executed. A restrictive-load failure hard-fails; there is no
+silent retry with ``weights_only=False``. Callers that must load a trusted
+legacy file pass ``weights_only=False`` explicitly.
 """
 
 from __future__ import annotations
 
-import pickle
-import warnings
 from pathlib import Path
 from typing import Any, cast
 
 import torch
 
-
-
-def _is_weights_only_load_failure(exc: BaseException) -> bool:
-    if isinstance(exc, pickle.UnpicklingError):
-        return True
-    msg = str(exc).lower()
-    return "weights_only" in msg or "weights only" in msg
 
 def load_torch_checkpoint(
     path: str | Path,
@@ -40,30 +31,17 @@ def load_torch_checkpoint(
     map_location:
         Forwarded to ``torch.load``.
     weights_only:
-        When ``True`` (default), attempts the restrictive unpickler first.
+        When ``True`` (default), use the restrictive unpickler. Failure does
+        not fall back to ``weights_only=False``.
     """
     path = Path(path)
     common_kw: dict[str, Any] = {"map_location": map_location}
     try:
         return torch.load(path, **common_kw, weights_only=weights_only)
     except TypeError:
-        # PyTorch without ``weights_only`` keyword.
+        # PyTorch without the ``weights_only`` keyword (API absence, not a
+        # scientific fallback for a failed restrictive load).
         return torch.load(path, **common_kw)
-    except (FileNotFoundError, PermissionError, OSError):
-        raise
-    except Exception as exc:
-        if not weights_only or not _is_weights_only_load_failure(exc):
-            raise
-        warnings.warn(
-            f"torch.load(weights_only=True) failed ({type(exc).__name__}: {exc!s}); "
-            "retrying with weights_only=False. Do not load checkpoints from untrusted sources.",
-            UserWarning,
-            stacklevel=2,
-        )
-        try:
-            return torch.load(path, **common_kw, weights_only=False)
-        except TypeError:
-            return torch.load(path, **common_kw)
 
 
 def _looks_like_pytorch_state_dict(obj: Any) -> bool:

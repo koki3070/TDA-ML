@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import pickle
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import torch
 
@@ -44,6 +46,27 @@ class TestCheckpointIO(unittest.TestCase):
             loaded = load_torch_checkpoint(path, map_location="cpu")
             sd = extract_model_state_dict(loaded)
             self.assertTrue(torch.equal(sd["layer.weight"], original["layer.weight"]))
+        finally:
+            path.unlink(missing_ok=True)
+
+    def test_weights_only_failure_does_not_retry_unrestricted(self) -> None:
+        original = _minimal_state_dict()
+        with tempfile.NamedTemporaryFile(suffix=".pth", delete=False) as f:
+            path = Path(f.name)
+        try:
+            torch.save(original, path)
+            calls: list[bool | None] = []
+
+            def _load(*_args: object, **kwargs: object) -> dict[str, torch.Tensor]:
+                calls.append(kwargs.get("weights_only"))  # type: ignore[arg-type]
+                if kwargs.get("weights_only") is True:
+                    raise pickle.UnpicklingError("weights_only rejected payload")
+                return original
+
+            with patch("torch.load", side_effect=_load):
+                with self.assertRaises(pickle.UnpicklingError):
+                    load_torch_checkpoint(path, map_location="cpu")
+            self.assertEqual(calls, [True])
         finally:
             path.unlink(missing_ok=True)
 

@@ -25,6 +25,8 @@ class TestTuneTrialConfig(unittest.TestCase):
         self.assertEqual(cfg["model"]["topology_loss"]["distance_backend"], "ellphi")
         self.assertEqual(cfg["data"]["max_points"], 100)
         self.assertEqual(cfg["data"]["num_outliers"], 20)
+        self.assertEqual(cfg["data"]["dataset_type"], "mnist")
+        self.assertEqual(cfg["data"]["outlier_mode"], "uniform")
 
     def test_canonical_power_tune_base(self):
         cfg = build_wdist_trial(

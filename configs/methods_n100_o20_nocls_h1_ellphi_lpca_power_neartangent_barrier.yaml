@@ -59,6 +59,7 @@ training:
       min_samples_values: null
 
 data:
+  dataset_type: mnist
   max_points: 100
   num_outliers: 20
   # GT-proximal anisotropic outliers: displace inliers within a ±30° cone

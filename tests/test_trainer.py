@@ -134,5 +134,14 @@ class TestTrainer(unittest.TestCase):
         self.assertFalse(cls_changed, "classification head should be frozen when w_class=0")
         self.assertTrue(topo_changed, "topology head should still update when w_class=0")
 
+    def test_single_axis_size_override_hard_fails(self):
+        self.config["training"]["lambda_major"] = 0.2
+        with self.assertRaisesRegex(ValueError, "lambda_major and training.lambda_minor"):
+            Trainer(self.model, self.config, self.device)
+
+    def test_w_size_applies_to_both_axes_when_split_absent(self):
+        self.assertEqual(self.trainer.lambda_major, 0.1)
+        self.assertEqual(self.trainer.lambda_minor, 0.1)
+
 if __name__ == '__main__':
     unittest.main()

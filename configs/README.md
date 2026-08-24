@@ -36,7 +36,7 @@ trailing tokens may truncate, e.g. `paper_h1_ellphi_lpca_pow`). Override with
 | `dev.yaml` | Small MNIST subset for local wiring (non-paper). |
 | `prod.yaml` | Longer CPU profile (non-paper). |
 | `test_fast.yaml` | Quick checks / CI. |
-| `paper_n100_o20_nocls_h1_ellphi_lpca_power.yaml` | **Paper production** (30ep, `w_class=0`, H1-only, local_pca, ellphi, power). |
+| `paper_n100_o20_nocls_h1_ellphi_lpca_power.yaml` | **Paper production** (30ep, MNIST + uniform outliers, `w_class=0`, H1-only, local_pca, ellphi, power). |
 | `tune_n100_o20_nocls_h1_ellphi_lpca_power.yaml` | Shared Optuna tune base for **both** W-Dist and MCC studies. |
 
 ## Methods（主表外・opt-in）

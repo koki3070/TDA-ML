@@ -52,6 +52,8 @@ training:
       min_samples_values: null
 
 data:
+  dataset_type: mnist
+  outlier_mode: uniform
   max_points: 100
   num_outliers: 20
   noise_std: 0.01

@@ -12,6 +12,11 @@ Computational discipline follows
 
 ## Claim (main table)
 
+This branch's main table is **MNIST** (`dataset_type=mnist`,
+`outlier_mode=uniform`, H1-only). Thin rings (`tda_ml/ring_dataset.py`) stay
+library-only here; they are **not** the paper table until the follow-up
+rings PR.
+
 Proposed method (W-Dist-tuned weights, 30 epochs × 5 data seeds) shows
 **comparable** outlier-removal performance to Euclidean DBSCAN and ADBSCAN on
 **MCC / G-Mean** (descriptive mean ± sample std over seeds; no equivalence test).
@@ -39,8 +44,9 @@ before `uv sync`. See `third_party/README.md` when bumping pins.
 ## Paper production path (primary)
 
 Main table: **W-Dist-tuned weights**, 30 epochs × 5 data seeds, `w_class=0`,
-H1-only, local-PCA teacher, ellphi distance, checkpoint `best_model.pth`
-(`selection=val_topo`), then val DBSCAN grid → test MCC / G-Mean.
+H1-only, **MNIST + uniform outliers**, local-PCA teacher, ellphi distance,
+checkpoint `best_model.pth` (`selection=val_topo`), then val DBSCAN grid →
+test MCC / G-Mean.
 
 Config: `paper_n100_o20_nocls_h1_ellphi_lpca_power`.
 

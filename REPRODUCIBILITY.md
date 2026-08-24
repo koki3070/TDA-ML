@@ -10,9 +10,10 @@
 ### 論文比較（W-Dist / MCC 二目的）で使う `experiments/`
 
 **論文主表の提案:** W-Dist tune 重みの 30ep 5-seed（`run_paper_30ep_multiseed.sh wdist`）。
+**データ:** MNIST（`dataset_type=mnist`, `outlier_mode=uniform`）。`thin_rings` はこの枝の主表ではない。
 **主張:** Euclidean DBSCAN / ADBSCAN と **同程度の外れ値除去性能**（MCC / G-Mean；5 seed の mean ± sample std による**記述的**比較。同等性検定は行わない）。主表に Topo W. 列は載せない。
 **比較の非対称:** ADBSCAN は学習なしの局所 PCA 楕円ベースライン。提案法は同一データで 30ep 学習する（計算資源・パラメータ更新は対等ではない）。
-**正本 config:** `paper_n100_o20_nocls_h1_ellphi_lpca_power`（`w_class=0`, `homology_dimensions=[1]`, `aniso_mode=elongate`）。
+**正本 config:** `paper_n100_o20_nocls_h1_ellphi_lpca_power`（`w_class=0`, `homology_dimensions=[1]`, `aniso_mode=elongate`, MNIST + uniform）。
 出力先は `WDIST_OUT` / `MCC_OUT` / `LOG_ROOT`（既定: `outputs/supervised/paper30_*`）で明示する（生成物は git に含めない）。
 
 | 区分 | パス |

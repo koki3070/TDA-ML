@@ -81,7 +81,7 @@ class Trainer:
         loss_cfg = config.get('loss', {})
         allow_legacy = reproducibility_settings(config)["allow_legacy_loss_keys"]
 
-        def _loss_or_legacy(key: str, legacy_key: str, default: float) -> float:
+        def _loss_or_legacy(key: str, legacy_key: str) -> float:
             if key in loss_cfg:
                 return loss_cfg[key]
             if allow_legacy and legacy_key in training_cfg:
@@ -94,18 +94,30 @@ class Trainer:
         self._repro = reproducibility_settings(config)
         self._manifest_ref = config.setdefault("_manifest", {})
 
-        self.lambda_class = _loss_or_legacy("w_class", "lambda_class", 1.0)
-        self.lambda_topo = _loss_or_legacy("w_topo", "lambda_topo", 0.1)
-        self.lambda_aniso = _loss_or_legacy("w_aniso", "lambda_aniso", 0.01)
+        self.lambda_class = _loss_or_legacy("w_class", "lambda_class")
+        self.lambda_topo = _loss_or_legacy("w_topo", "lambda_topo")
+        self.lambda_aniso = _loss_or_legacy("w_aniso", "lambda_aniso")
         self.topo_loss_max_points = training_cfg.get(
             'topo_loss_max_points', loss_cfg.get('topo_loss_max_points')
         )
         if self.topo_loss_max_points is not None:
             self.topo_loss_max_points = int(self.topo_loss_max_points)
-        
-        size_default = _loss_or_legacy("w_size", "lambda_size", 0.1)
-        self.lambda_major = training_cfg.get("lambda_major", size_default)
-        self.lambda_minor = training_cfg.get("lambda_minor", size_default)
+
+        size_default = _loss_or_legacy("w_size", "lambda_size")
+        has_major = "lambda_major" in training_cfg
+        has_minor = "lambda_minor" in training_cfg
+        if has_major ^ has_minor:
+            raise ValueError(
+                "training.lambda_major and training.lambda_minor must be set together; "
+                "a single-axis override is refused. Omit both to use loss.w_size for "
+                "each axis."
+            )
+        if has_major:
+            self.lambda_major = float(training_cfg["lambda_major"])
+            self.lambda_minor = float(training_cfg["lambda_minor"])
+        else:
+            self.lambda_major = size_default
+            self.lambda_minor = size_default
 
         aniso_raw = loss_cfg.get("aniso_mode", training_cfg.get("aniso_mode"))
         if aniso_raw is None:
