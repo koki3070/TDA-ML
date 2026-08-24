@@ -1,5 +1,6 @@
-# H1-only tune on NEAR-tangent outliers with the elongate_barrier degeneracy guard.
-# Same stack as elongate_n100_no_cls_tune_local_pca_ellphi_power, plus
+# Methods opt-in (not paper main table): near-tangent outliers + elongate_barrier.
+# Naming: methods role, n100, o20, nocls, h1, ellphi, lpca, power, neartangent_barrier.
+# Same stack as tune_n100_o20_nocls_h1_ellphi_lpca_power, plus
 # near-tangent outlier data and loss.aniso_mode: elongate_barrier
 # (+ explicit aniso_barrier_threshold).
 #
@@ -9,9 +10,11 @@
 # conditions died). The barrier keeps the elongate reward below the aspect
 # ceiling and pushes back quadratically above it, bounding minor >= major/T.
 # T=6.0 matches the declared PAPER_NO_CLS_BARRIER_CONTRACT constant.
+#
+# Opt-in via BASE_CONFIG=... ; never an implicit swap for paper 30ep / ADBSCAN.
 
 meta:
-  config_id: "elongate_n100_no_cls_tune_local_pca_ellphi_power_h1_neartangent_barrier"
+  config_id: "methods_n100_o20_nocls_h1_ellphi_lpca_power_neartangent_barrier"
 
 model:
   point_dim: 2

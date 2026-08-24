@@ -21,7 +21,13 @@ def short_backend(name: str) -> str:
 
 
 def shorten_config_id(config_id: str, *, max_len: int = 24) -> str:
-    """Derive a compact slug from a legacy config_id."""
+    """Derive a compact slug from a config_id (including legacy aliases)."""
+    m = re.fullmatch(r"paper_seed(\d+)", config_id)
+    if m:
+        return f"paper_s{m.group(1)}"
+
+    # Pre-rename production id. Kept distinct from paper_s* so re-running an old
+    # config_id cannot land in the current paper run namespace.
     m = re.fullmatch(r"teacher_local_pca_power_seed(\d+)", config_id)
     if m:
         return f"pwr_s{m.group(1)}"
@@ -38,7 +44,7 @@ def shorten_config_id(config_id: str, *, max_len: int = 24) -> str:
     if m:
         return f"t{m.group(1)}"
 
-    m = re.fullmatch(r"tune_elongate_t(\d+)", config_id)
+    m = re.fullmatch(r"tune_t(\d+)", config_id)
     if m:
         return f"t{m.group(1)}"
 
@@ -53,6 +59,13 @@ def shorten_config_id(config_id: str, *, max_len: int = 24) -> str:
     m = re.fullmatch(r"smoke_(.+)", config_id)
     if m:
         return f"smk_{m.group(1)}"
+
+    # Named paper/tune/methods YAMLs: drop dataset/contract tokens but keep the
+    # role, otherwise paper_* / tune_* / methods_* collapse to the same slug.
+    m = re.fullmatch(r"(paper|tune|methods)_n\d+_o\d+_nocls_(.+)", config_id)
+    if m:
+        slug = f"{m.group(1)}_{m.group(2)}"
+        return slug[:max_len] if len(slug) > max_len else slug
 
     slug = config_id
     for prefix in ("elongate_n100_no_cls_", "teacher_local_pca_"):
@@ -113,3 +126,39 @@ def tune_base(slug: str, when: datetime.datetime | None = None) -> str:
 
 def visualization_filename(epoch: int) -> str:
     return f"e{epoch}.png"
+
+
+def assert_no_legacy_paper_run_namespace(out_base: Path) -> None:
+    """Refuse leftover ``pwr_s*`` trees (pre-PR#7) and mixed namespaces.
+
+    Production runs were renamed ``pwr_s*`` → ``paper_s*``. The check is
+    **out_base-wide**, not per-seed: leftover ``pwr_s123_*`` must block a
+    freshness probe for seed 42, otherwise the 30ep driver would treat that
+    seed as missing and start ``paper_s42_*`` beside the legacy tree.
+
+    Aggregating or skipping via silent reuse of legacy trees would be an
+    implicit fallback; hard-fail instead and require a fresh ``paper_s*``
+    tree (or a clean out_base).
+    """
+    out_base = Path(out_base)
+    if not out_base.exists():
+        return
+    legacy_dirs = sorted(p for p in out_base.glob("pwr_s*") if p.is_dir())
+    modern_dirs = sorted(p for p in out_base.glob("paper_s*") if p.is_dir())
+
+    if legacy_dirs and modern_dirs:
+        raise RuntimeError(
+            f"Mixed legacy pwr_s* and paper_s* under {out_base}: "
+            f"legacy={[p.name for p in legacy_dirs]}, "
+            f"modern={[p.name for p in modern_dirs]}. "
+            "Refuse to aggregate or skip; use one namespace only "
+            "(move/delete legacy trees or choose a fresh --out-base)."
+        )
+    if legacy_dirs:
+        raise RuntimeError(
+            f"Legacy pwr_s* run tree(s) under {out_base}: "
+            f"{[p.name for p in legacy_dirs]}. "
+            "PR #7 renamed production runs to paper_s*; legacy trees are not "
+            "aggregated or treated as fresh. Move/delete them or use a fresh "
+            "--out-base, then re-run production."
+        )

@@ -42,18 +42,18 @@ Main table: **W-Dist-tuned weights**, 30 epochs × 5 data seeds, `w_class=0`,
 H1-only, local-PCA teacher, ellphi distance, checkpoint `best_model.pth`
 (`selection=val_topo`), then val DBSCAN grid → test MCC / G-Mean.
 
-Config: `elongate_n100_no_cls_full120_teacher_local_pca`.
+Config: `paper_n100_o20_nocls_h1_ellphi_lpca_power`.
 
 ```bash
 # 1) Tune once (Optuna sampler seeds differ per worker; data seed in YAML is 42).
 #    Default MODE=both also runs the secondary MCC study; main table needs wdist.
-MODE=wdist bash experiments/run_tune_local_pca_power_objectives.sh
+MODE=wdist bash experiments/tune_objectives.sh
 
 # 2) Fixed W-Dist weights → 30ep × 5 seeds → paper eval (+ baselines separately)
-bash experiments/run_teacher_local_pca_power_30ep_multiseed.sh wdist
+bash experiments/run_paper_30ep_multiseed.sh wdist
 
-uv run python experiments/evaluate_paper_baselines.py \
-  --base-config elongate_n100_no_cls_full120_teacher_local_pca \
+uv run python experiments/eval_baselines.py \
+  --base-config paper_n100_o20_nocls_h1_ellphi_lpca_power \
   --out-dir outputs/paper_baselines
 ```
 

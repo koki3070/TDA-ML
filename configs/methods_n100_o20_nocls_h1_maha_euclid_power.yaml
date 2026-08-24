@@ -1,8 +1,10 @@
-# no_cls baseline contrast: Euclidean-teacher column (not the paper main table).
+# Methods contrast (not paper main table): Euclidean-teacher column.
+# Naming: methods role, n100, o20, nocls, h1, maha backend, euclid teacher, power.
 # selection.metric=val_topo matches the paper checkpoint protocol (best_model.pth).
+# Opt-in only; never an implicit swap for paper/tune paths.
 
 meta:
-  config_id: "elongate_n100_no_cls_full120_baseline"
+  config_id: "methods_n100_o20_nocls_h1_maha_euclid_power"
 
 model:
   point_dim: 2

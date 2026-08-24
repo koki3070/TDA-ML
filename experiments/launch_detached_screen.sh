@@ -6,9 +6,9 @@
 #   bash experiments/launch_detached_screen.sh SESSION_NAME LOG_FILE SCRIPT.sh [args...]
 #
 # Example:
-#   bash experiments/launch_detached_screen.sh pwr30 \
-#     outputs/supervised/pwr30/driver.log \
-#     experiments/run_teacher_local_pca_power_30ep_multiseed.sh wdist
+#   bash experiments/launch_detached_screen.sh paper30 \
+#     outputs/supervised/paper30/driver.log \
+#     experiments/run_paper_30ep_multiseed.sh wdist
 
 set -euo pipefail
 

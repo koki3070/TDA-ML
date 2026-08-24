@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -11,15 +12,16 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "experiments"))
 
-from aggregate_power_30ep_multiseed import discover_seed_metrics  # noqa: E402
-from power_30ep_freshness import inspect_seed_metrics  # noqa: E402
-from run_teacher_local_pca_power_30ep import (  # noqa: E402
+from aggregate_paper_multiseed import discover_seed_metrics  # noqa: E402
+from paper_run_freshness import inspect_seed_metrics  # noqa: E402
+from run_paper_30ep import (  # noqa: E402
     TAG_MCC,
     TAG_WDIST,
     infer_tag,
     load_tune_weights,
 )
 from tda_ml.preflight import PAPER_NO_CLS_CONTRACT, preflight_training_config  # noqa: E402
+from tda_ml.run_paths import assert_no_legacy_paper_run_namespace  # noqa: E402
 
 
 class TestAggregateDiscover(unittest.TestCase):
@@ -27,7 +29,7 @@ class TestAggregateDiscover(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             for i, mcc in enumerate([0.1, 0.9]):
-                logs = root / f"pwr_s42_run{i}" / "logs"
+                logs = root / f"paper_s42_run{i}" / "logs"
                 logs.mkdir(parents=True)
                 (logs / "run_manifest.json").write_text(
                     json.dumps({"seed": 42, "tune_json": "/x.json"}),
@@ -45,7 +47,7 @@ class TestAggregateDiscover(unittest.TestCase):
     def test_missing_manifest_seed_hard_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            logs = root / "pwr_s42_x" / "logs"
+            logs = root / "paper_s42_x" / "logs"
             logs.mkdir(parents=True)
             (logs / "paper_metrics_test_foo.json").write_text(
                 json.dumps({"mcc": 0.1, "gmean": 0.5, "wdist": 1.0}),
@@ -53,6 +55,21 @@ class TestAggregateDiscover(unittest.TestCase):
             )
             with self.assertRaisesRegex(ValueError, "Missing run_manifest"):
                 discover_seed_metrics(root, "**/paper_metrics_test_*.json")
+
+    def test_legacy_pwr_namespace_hard_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pwr_s42_old" / "logs").mkdir(parents=True)
+            with self.assertRaisesRegex(RuntimeError, "Legacy pwr_s"):
+                discover_seed_metrics(root, "paper_s*/logs/paper_metrics_test_*.json")
+
+    def test_mixed_pwr_paper_namespace_hard_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pwr_s42_old" / "logs").mkdir(parents=True)
+            (root / "paper_s42_new" / "logs").mkdir(parents=True)
+            with self.assertRaisesRegex(RuntimeError, "Mixed legacy"):
+                discover_seed_metrics(root, "paper_s*/logs/paper_metrics_test_*.json")
 
 
 class TestLoadTuneWeights(unittest.TestCase):
@@ -110,7 +127,7 @@ class TestPreflightHomology(unittest.TestCase):
         from tda_ml.config import deep_update, load_config
 
         cfg = load_config(
-            "elongate_n100_no_cls_full120_teacher_local_pca",
+            "paper_n100_o20_nocls_h1_ellphi_lpca_power",
             project_root=REPO,
         )
         bad = deep_update(
@@ -130,7 +147,7 @@ class TestFreshness(unittest.TestCase):
             status, paths = inspect_seed_metrics(
                 out_base=Path(tmp),
                 seed=42,
-                tag="power_wdist_valtopo_paper_eval",
+                tag="wdist",
                 tune_json=Path(tmp) / "missing.json",
                 expected_revision="deadbeef",
             )
@@ -142,7 +159,7 @@ class TestFreshness(unittest.TestCase):
             root = Path(tmp)
             tune = root / "best.json"
             tune.write_text("{}", encoding="utf-8")
-            logs = root / "pwr_s42_x" / "logs"
+            logs = root / "paper_s42_x" / "logs"
             logs.mkdir(parents=True)
             (logs / "run_manifest.json").write_text(
                 json.dumps(
@@ -155,16 +172,173 @@ class TestFreshness(unittest.TestCase):
                 encoding="utf-8",
             )
             (
-                logs / "paper_metrics_test_power_wdist_valtopo_paper_eval.json"
+                logs / "paper_metrics_test_wdist.json"
             ).write_text("{}", encoding="utf-8")
             status, _ = inspect_seed_metrics(
                 out_base=root,
                 seed=42,
-                tag="power_wdist_valtopo_paper_eval",
+                tag="wdist",
                 tune_json=tune,
                 expected_revision="newrev",
             )
             self.assertEqual(status, "stale")
+
+    def test_legacy_pwr_namespace_hard_fails_before_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pwr_s42_old" / "logs").mkdir(parents=True)
+            with self.assertRaisesRegex(RuntimeError, "Legacy pwr_s"):
+                inspect_seed_metrics(
+                    out_base=root,
+                    seed=42,
+                    tag="wdist",
+                    tune_json=Path(tmp) / "best.json",
+                    expected_revision="deadbeef",
+                )
+
+    def test_other_seed_legacy_pwr_hard_fails_before_missing(self):
+        """Leftover pwr_s* for a different seed must not look like 'missing'."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pwr_s123_old" / "logs").mkdir(parents=True)
+            with self.assertRaisesRegex(RuntimeError, "Legacy pwr_s"):
+                inspect_seed_metrics(
+                    out_base=root,
+                    seed=42,
+                    tag="wdist",
+                    tune_json=Path(tmp) / "best.json",
+                    expected_revision="deadbeef",
+                )
+
+
+class TestFreshnessCLI(unittest.TestCase):
+    """The 30ep driver keys off CLI exit codes: 1 = run, 2 = refuse."""
+
+    def _run_cli(self, out_base: Path, *, seed: int = 42, tag: str = "wdist",
+                 tune_json: Path | None = None) -> subprocess.CompletedProcess[str]:
+        if tune_json is None:
+            tune_json = out_base / "best.json"
+        return subprocess.run(
+            [
+                sys.executable,
+                str(REPO / "experiments" / "paper_run_freshness.py"),
+                "--out-base",
+                str(out_base),
+                "--seed",
+                str(seed),
+                "--tag",
+                tag,
+                "--tune-json",
+                str(tune_json),
+            ],
+            cwd=str(REPO),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_cli_missing_exits_1(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            proc = self._run_cli(root)
+            self.assertEqual(proc.returncode, 1, proc.stderr)
+            self.assertIn("[missing]", proc.stdout)
+
+    def test_cli_legacy_pwr_exits_2_not_1(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pwr_s42_old" / "logs").mkdir(parents=True)
+            proc = self._run_cli(root)
+            self.assertEqual(proc.returncode, 2, proc.stderr)
+            self.assertIn("Legacy pwr_s", proc.stderr)
+
+    def test_cli_other_seed_legacy_pwr_exits_2_not_1(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pwr_s123_old" / "logs").mkdir(parents=True)
+            proc = self._run_cli(root, seed=42)
+            self.assertEqual(proc.returncode, 2, proc.stderr)
+            self.assertIn("Legacy pwr_s", proc.stderr)
+            self.assertNotEqual(proc.returncode, 1)
+
+    def test_cli_mixed_namespace_exits_2_not_1(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pwr_s42_old" / "logs").mkdir(parents=True)
+            (root / "paper_s42_new" / "logs").mkdir(parents=True)
+            proc = self._run_cli(root)
+            self.assertEqual(proc.returncode, 2, proc.stderr)
+            self.assertIn("Mixed legacy", proc.stderr)
+
+    def test_cli_mixed_other_seed_legacy_exits_2_not_1(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pwr_s123_old" / "logs").mkdir(parents=True)
+            (root / "paper_s42_new" / "logs").mkdir(parents=True)
+            proc = self._run_cli(root, seed=42)
+            self.assertEqual(proc.returncode, 2, proc.stderr)
+            self.assertIn("Mixed legacy", proc.stderr)
+            self.assertNotEqual(proc.returncode, 1)
+
+    def test_cli_stale_revision_exits_2(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tune = root / "best.json"
+            tune.write_text("{}", encoding="utf-8")
+            logs = root / "paper_s42_x" / "logs"
+            logs.mkdir(parents=True)
+            (logs / "run_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "seed": 42,
+                        "tune_json": str(tune.resolve()),
+                        "source_revision": "oldrev",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (logs / "paper_metrics_test_wdist.json").write_text(
+                "{}", encoding="utf-8"
+            )
+            proc = self._run_cli(root, tune_json=tune)
+            self.assertEqual(proc.returncode, 2, proc.stderr)
+            self.assertIn("stale", proc.stderr)
+
+    def test_cli_corrupt_manifest_exits_2_not_1(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tune = root / "best.json"
+            tune.write_text("{}", encoding="utf-8")
+            logs = root / "paper_s42_x" / "logs"
+            logs.mkdir(parents=True)
+            (logs / "run_manifest.json").write_text("{not-json", encoding="utf-8")
+            (logs / "paper_metrics_test_wdist.json").write_text(
+                "{}", encoding="utf-8"
+            )
+            proc = self._run_cli(root, tune_json=tune)
+            self.assertEqual(proc.returncode, 2, proc.stderr)
+            self.assertNotEqual(proc.returncode, 1)
+
+
+class TestLegacyNamespaceHelper(unittest.TestCase):
+    def test_empty_out_base_ok(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            assert_no_legacy_paper_run_namespace(Path(tmp))
+
+    def test_other_seed_legacy_tree_hard_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pwr_s123_old" / "logs").mkdir(parents=True)
+            with self.assertRaisesRegex(RuntimeError, "Legacy pwr_s"):
+                assert_no_legacy_paper_run_namespace(root)
+
+    def test_mixed_other_seed_legacy_with_modern_hard_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pwr_s123_old" / "logs").mkdir(parents=True)
+            (root / "paper_s42_new" / "logs").mkdir(parents=True)
+            with self.assertRaisesRegex(RuntimeError, "Mixed legacy"):
+                assert_no_legacy_paper_run_namespace(root)
 
 
 class TestPaperContractExpanded(unittest.TestCase):

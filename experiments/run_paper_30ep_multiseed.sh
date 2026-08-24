@@ -4,16 +4,16 @@
 # Protocol: tune once on seed 42 → apply same w_*, lr to all 5 data seeds.
 #
 # Usage:
-#   bash experiments/run_teacher_local_pca_power_30ep_multiseed.sh [MODE] [SEEDS...]
+#   bash experiments/run_paper_30ep_multiseed.sh [MODE] [SEEDS...]
 #
 # MODE: wdist | mcc | both (default both)
 # SEEDS: default 42 123 456 789 1024
 #
 # Detached (SSH/logout safe; machine reboot still stops the job):
 #   N_WORKERS=4 THREADS_PER_WORKER=4 \
-#   bash experiments/launch_detached_screen.sh pwr30_ms \
-#     outputs/supervised/pwr30_multiseed/driver.log \
-#     experiments/run_teacher_local_pca_power_30ep_multiseed.sh both
+#   bash experiments/launch_detached_screen.sh paper30_ms \
+#     outputs/supervised/paper30_multiseed/driver.log \
+#     experiments/run_paper_30ep_multiseed.sh both
 #
 # Parallelism: N_WORKERS seeds per objective wave; THREADS_PER_WORKER per process
 # (bench: raising OMP past 4 does not speed ellphi topo; parallel seeds do).
@@ -41,14 +41,14 @@ else
   SEEDS=(42 123 456 789 1024)
 fi
 
-WDIST_JSON="${WDIST_JSON:-outputs/tune/pwr_wdist/best_elongate_wdist_ellphi.json}"
-MCC_JSON="${MCC_JSON:-outputs/tune/pwr_mcc_dbscan_mahalanobis/best_elongate_mcc_ellphi_dbscan_mahalanobis.json}"
-WDIST_OUT="${WDIST_OUT:-outputs/supervised/pwr30_wdist}"
-MCC_OUT="${MCC_OUT:-outputs/supervised/pwr30_mcc_maha}"
-LOG_ROOT="${LOG_ROOT:-outputs/supervised/pwr30_multiseed}"
+WDIST_JSON="${WDIST_JSON:-outputs/tune/wdist/best_wdist_ellphi.json}"
+MCC_JSON="${MCC_JSON:-outputs/tune/mcc_dbscan_mahalanobis/best_mcc_ellphi_dbscan_mahalanobis.json}"
+WDIST_OUT="${WDIST_OUT:-outputs/supervised/paper30_wdist}"
+MCC_OUT="${MCC_OUT:-outputs/supervised/paper30_mcc}"
+LOG_ROOT="${LOG_ROOT:-outputs/supervised/paper30_multiseed}"
 EPOCHS="${EPOCHS:-30}"
 DBSCAN_BACKEND="${DBSCAN_BACKEND:-mahalanobis}"
-BASE_CONFIG="${BASE_CONFIG:-elongate_n100_no_cls_full120_teacher_local_pca}"
+BASE_CONFIG="${BASE_CONFIG:-paper_n100_o20_nocls_h1_ellphi_lpca_power}"
 # Declared paper contract variant the tune JSONs must match (elongate | elongate_barrier).
 ANISO_VARIANT="${ANISO_VARIANT:-elongate}"
 
@@ -61,7 +61,7 @@ _metrics_done() {
   local tag="$3"
   local tune_json="$4"
   local rc=0
-  uv run python experiments/power_30ep_freshness.py \
+  uv run python experiments/paper_run_freshness.py \
     --out-base "${out_base}" \
     --seed "${seed}" \
     --tag "${tag}" \
@@ -93,7 +93,7 @@ _run_seed() {
   OMP_NUM_THREADS="${THREADS_PER_WORKER}" \
   MKL_NUM_THREADS="${THREADS_PER_WORKER}" \
   OPENBLAS_NUM_THREADS="${THREADS_PER_WORKER}" \
-  uv run python -u experiments/run_teacher_local_pca_power_30ep.py \
+  uv run python -u experiments/run_paper_30ep.py \
     --base-config "${BASE_CONFIG}" \
     --epochs "${EPOCHS}" \
     --seed "${seed}" \
@@ -171,14 +171,14 @@ _run_method() {
 
 case "${MODE}" in
   wdist)
-    _run_method "wdist" "${WDIST_JSON}" "${WDIST_OUT}" "power_wdist_valtopo_paper_eval"
+    _run_method "wdist" "${WDIST_JSON}" "${WDIST_OUT}" "wdist"
     ;;
   mcc)
-    _run_method "mcc" "${MCC_JSON}" "${MCC_OUT}" "power_mcc_valtopo_paper_eval"
+    _run_method "mcc" "${MCC_JSON}" "${MCC_OUT}" "mcc"
     ;;
   both)
-    _run_method "wdist" "${WDIST_JSON}" "${WDIST_OUT}" "power_wdist_valtopo_paper_eval"
-    _run_method "mcc" "${MCC_JSON}" "${MCC_OUT}" "power_mcc_valtopo_paper_eval"
+    _run_method "wdist" "${WDIST_JSON}" "${WDIST_OUT}" "wdist"
+    _run_method "mcc" "${MCC_JSON}" "${MCC_OUT}" "mcc"
     ;;
   *)
     echo "Unknown MODE=${MODE} (use wdist, mcc, or both)" >&2
@@ -201,6 +201,6 @@ case "${MODE}" in
   mcc) AGG_ARGS+=(--methods mcc) ;;
 esac
 # Strict: missing seeds or aggregation failure must fail this driver (no || true).
-uv run python -u experiments/aggregate_power_30ep_multiseed.py "${AGG_ARGS[@]}"
+uv run python -u experiments/aggregate_paper_multiseed.py "${AGG_ARGS[@]}"
 
 echo "Done. Logs: ${LOG_ROOT}/"

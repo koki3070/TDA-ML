@@ -2,7 +2,7 @@
 
 Default production protocol (``val_topo``):
 - During training: save ``best_model.pth`` at minimum ``val_topo_loss`` (no DBSCAN grid).
-- After training: ``evaluate_paper_protocol.py`` grid-searches DBSCAN on val once, then
+- After training: ``eval_paper.py`` grid-searches DBSCAN on val once, then
   reports test MCC at the chosen ``(eps, min_samples)``.
 
 Optional ``wdist`` / ``dbscan_mcc`` run a val DBSCAN grid every ``eval_every`` epochs to

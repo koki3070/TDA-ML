@@ -18,7 +18,7 @@ Optional: ``size_ref``, ``size_power`` when ``--tune-size-hyperparams``.
 
 Usage::
 
-    bash experiments/run_tune_local_pca_power_mcc_parallel.sh 4 24 20 ellphi
+    bash experiments/tune_mcc_parallel.sh 4 24 20 ellphi
 """
 
 from __future__ import annotations
@@ -42,12 +42,12 @@ from tda_ml.reproducibility import reproducibility_settings, write_json
 from tda_ml.supervised_diagnostics import git_revision
 from tda_ml.topo_wdist import topo_wdist_options_from_config
 
-from evaluate_paper_protocol import (  # noqa: E402
+from eval_paper import (  # noqa: E402
     build_split_loader,
     iter_cloud_predictions,
     load_model_from_run,
 )
-from tune_elongate_wdist import mean_val_topo_wdist  # noqa: E402
+from tune_wdist import mean_val_topo_wdist  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CHECKPOINT_POLICY = "val_topo_best"
@@ -200,10 +200,9 @@ def make_objective(args: argparse.Namespace):
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument(
-        "--base-config",
-        default="elongate_n100_no_cls_tune_local_pca_ellphi_power",
-    )
+    # No implicit default: every study must state its config surface explicitly
+    # (power stack uses tune_n100_o20_nocls_h1_ellphi_lpca_power).
+    p.add_argument("--base-config", type=str, required=True)
     p.add_argument("--n-trials", type=int, default=24)
     p.add_argument(
         "--max-complete-trials",
@@ -229,7 +228,7 @@ def parse_args() -> argparse.Namespace:
             "not a point-to-point distance)."
         ),
     )
-    p.add_argument("--out-base", default="outputs/tune/pwr_mcc")
+    p.add_argument("--out-base", default="outputs/tune/mcc")
     p.add_argument("--size-mode", default="power", choices=["quadratic", "power", "softplus", "barrier"])
     p.add_argument("--size-ref", type=float, default=1.34)
     p.add_argument("--size-power", type=float, default=1.5)
@@ -240,7 +239,7 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--storage", default=None)
-    p.add_argument("--study-name", default="elongate_local_pca_power_mcc_ellphi")
+    p.add_argument("--study-name", default="tune_mcc_ellphi")
     p.add_argument("--write-best", action="store_true")
     return p.parse_args()
 
@@ -274,7 +273,7 @@ def main() -> int:
     preflight.update(
         {
             "run_status": "pending",
-            "command_entry": "experiments/tune_elongate_mcc.py",
+            "command_entry": "experiments/tune_mcc.py",
             "source_revision": git_revision(REPO_ROOT),
             "study_name": args.study_name,
             "storage": args.storage,
@@ -365,7 +364,7 @@ def main() -> int:
     }
     out_path = (
         Path(args.out_base)
-        / f"best_elongate_mcc_{args.backend}_dbscan_{args.dbscan_backend}.json"
+        / f"best_mcc_{args.backend}_dbscan_{args.dbscan_backend}.json"
     )
     out_path.write_text(json.dumps(payload, indent=2) + "\n")
     print(json.dumps({k: payload[k] for k in ("best_value_mcc", "best_params", "best_val_topo_wdist")}, indent=2))

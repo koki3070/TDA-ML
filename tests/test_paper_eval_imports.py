@@ -16,8 +16,8 @@ from tda_ml.reproducibility import build_reproducibility_manifest_fields
 
 class TestPaperEvalImports(unittest.TestCase):
     def test_baselines_and_protocol_import(self):
-        import experiments.evaluate_paper_baselines as baselines
-        import experiments.evaluate_paper_protocol as protocol
+        import experiments.eval_baselines as baselines
+        import experiments.eval_paper as protocol
 
         self.assertTrue(callable(baselines.evaluate_adbscan))
         self.assertTrue(callable(protocol.load_model_from_run))
@@ -28,7 +28,7 @@ class TestPaperEvalImports(unittest.TestCase):
         from tda_ml.config import default_data_root
         from tda_ml.run_setup import default_data_root as train_data_root
 
-        import experiments.evaluate_paper_protocol as protocol
+        import experiments.eval_paper as protocol
 
         self.assertIs(protocol.default_data_root, default_data_root)
         self.assertIs(train_data_root, default_data_root)
@@ -36,16 +36,24 @@ class TestPaperEvalImports(unittest.TestCase):
 
     def test_public_paper_configs_pass_contract(self):
         assert_paper_no_cls_contract(
-            load_config("elongate_n100_no_cls_full120_teacher_local_pca")
+            load_config("paper_n100_o20_nocls_h1_ellphi_lpca_power")
         )
         assert_paper_no_cls_contract(
-            load_config("elongate_n100_no_cls_tune_local_pca_ellphi_power")
+            load_config("tune_n100_o20_nocls_h1_ellphi_lpca_power")
         )
         assert_paper_no_cls_contract(
             load_config(
-                "elongate_n100_no_cls_tune_local_pca_ellphi_power_h1_neartangent_barrier"
+                "methods_n100_o20_nocls_h1_ellphi_lpca_power_neartangent_barrier"
             )
         )
+
+    def test_methods_euclid_baseline_declares_contrast_stack(self):
+        cfg = load_config("methods_n100_o20_nocls_h1_maha_euclid_power")
+        self.assertEqual(cfg["loss"]["teacher_mode"], "euclidean")
+        self.assertEqual(cfg["model"]["topology_loss"]["distance_backend"], "mahalanobis")
+        self.assertEqual(cfg["model"]["topology_loss"]["homology_dimensions"], [1])
+        self.assertEqual(cfg["loss"]["w_class"], 0.0)
+        self.assertEqual(cfg["training"]["selection"]["metric"], "val_topo")
 
     def test_paper_eval_requires_best_model_only(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -59,7 +67,7 @@ class TestPaperEvalImports(unittest.TestCase):
                 resolve_val_topo_checkpoint(run_dir)
 
     def test_manifest_records_zero_pad_constant(self):
-        cfg = load_config("elongate_n100_no_cls_full120_teacher_local_pca")
+        cfg = load_config("paper_n100_o20_nocls_h1_ellphi_lpca_power")
         fields = build_reproducibility_manifest_fields(cfg)
         self.assertIn("ZERO_PAD_ABS_SUM", fields["numerical_constants"])
 

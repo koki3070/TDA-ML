@@ -2,8 +2,8 @@
 """
 Paper-aligned baseline evaluation.
 
-Same data split as ``evaluate_paper_protocol.py`` under the paper elongate
-config (typically ``elongate_n100_no_cls_full120_teacher_local_pca``), seeds
+Same data split as ``eval_paper.py`` under the paper
+config (typically ``paper_n100_o20_nocls_h1_ellphi_lpca_power``), seeds
 42 / 123 / 456 / 789 / 1024: tune hyperparameters on validation clouds, report
 MCC / G-Mean on test. Topo W-Dist is computed for diagnostics only and is
 **not** a main-table column.
@@ -17,8 +17,8 @@ Methods:
 
 Usage::
 
-    uv run python experiments/evaluate_paper_baselines.py \\
-        --base-config elongate_n100_no_cls_full120_teacher_local_pca \\
+    uv run python experiments/eval_baselines.py \\
+        --base-config paper_n100_o20_nocls_h1_ellphi_lpca_power \\
         --out-dir outputs/paper_baselines
 """
 
@@ -39,7 +39,7 @@ from sklearn.ensemble import IsolationForest
 from sklearn.neighbors import LocalOutlierFactor
 from tqdm import tqdm
 
-from experiments.evaluate_paper_protocol import (
+from experiments.eval_paper import (
     CloudMetrics,
     _aggregate_classification_metrics,
     _aggregate_cloud_metrics,
@@ -465,8 +465,8 @@ METHOD_ORDER = [
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
-    # No implicit default: the n100 paper comparison must pass the elongate config
-    # (e.g. elongate_n100_no_cls_full120_teacher_local_pca); baselines share its
+    # No implicit default: the n100 paper comparison must pass the paper config
+    # (e.g. paper_n100_o20_nocls_h1_ellphi_lpca_power); baselines share its
     # data settings and evaluation.dbscan / evaluation.baselines grids.
     p.add_argument("--base-config", type=str, required=True)
     p.add_argument("--out-dir", type=Path, default=REPO_ROOT / "outputs" / "paper_baselines")

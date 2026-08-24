@@ -6,9 +6,9 @@
 # 使い方:
 #   scripts/new_experiment.sh [--no-cls|--tune] <slug> ["1行の目的"]
 # 例:
-#   scripts/new_experiment.sh pwr30ep_seed42 "power size 30ep"
+#   scripts/new_experiment.sh paper30_s42 "paper 30ep"
 #   scripts/new_experiment.sh --no-cls bar_smoke "barrier loss smoke"
-#   scripts/new_experiment.sh --tune pwr_mcc "ellphi+power MCC tune"
+#   scripts/new_experiment.sh --tune mcc "paper MCC tune"
 set -euo pipefail
 
 mode_dir="supervised"
