@@ -25,9 +25,14 @@ class TestRunPaths(unittest.TestCase):
     def test_shorten_config_id_keeps_paper_tune_role_distinct(self) -> None:
         paper = shorten_config_id("paper_n100_o20_nocls_h1_ellphi_lpca_power")
         tune = shorten_config_id("tune_n100_o20_nocls_h1_ellphi_lpca_power")
+        methods = shorten_config_id(
+            "methods_n100_o20_nocls_h1_ellphi_lpca_power_neartangent_barrier"
+        )
         self.assertTrue(paper.startswith("paper_"))
         self.assertTrue(tune.startswith("tune_"))
+        self.assertTrue(methods.startswith("methods_"))
         self.assertNotEqual(paper, tune)
+        self.assertNotEqual(paper, methods)
 
     def test_shorten_config_id_legacy_ids_keep_old_slugs(self) -> None:
         """Pre-rename ids must not alias into the current paper_s* namespace."""

@@ -1,0 +1,67 @@
+# Methods contrast (not paper main table): Euclidean-teacher column.
+# Naming: methods role, n100, o20, nocls, h1, maha backend, euclid teacher, power.
+# selection.metric=val_topo matches the paper checkpoint protocol (best_model.pth).
+# Opt-in only; never an implicit swap for paper/tune paths.
+
+meta:
+  config_id: "methods_n100_o20_nocls_h1_maha_euclid_power"
+
+model:
+  point_dim: 2
+  feature_dim: 128
+  ellipse_param_dim: 5
+  threshold: 0.5
+  topology_loss:
+    metric_type: "anisotropic"
+    distance_backend: "mahalanobis"
+    ellphi_differentiable: true
+    prob_weighting: false
+    homology_dimensions: [1]
+
+loss:
+  w_class: 0.0
+  w_topo: 0.0883
+  w_aniso: 0.0541
+  w_size: 0.488
+  pos_weight: 1.0
+  aniso_mode: "elongate"
+  size_mode: power
+  size_ref: 1.34
+  size_power: 1.5
+  topo_eps_scale: 1.0
+  topo_scale_mode: fixed
+  teacher_mode: euclidean
+
+training:
+  lr: 0.000158
+  epochs: 30
+  grad_clip_value: 1.0
+  visualize_every: 10
+  warmup_epochs: 0
+  selection:
+    metric: val_topo
+    eval_every: 1
+    dbscan:
+      eps_values: null
+      min_samples_values: null
+
+data:
+  max_points: 100
+  num_outliers: 20
+  noise_std: 0.01
+  seed: 42
+  train_size: 4500
+  val_size: 500
+  test_size: 1000
+  num_workers: 2
+  batch_size: 64
+  pin_memory: true
+
+performance:
+  cudnn_benchmark: true
+  enable_tf32: true
+  matmul_precision: high
+
+outputs:
+  base_dir: "outputs"
+  save_every: 1

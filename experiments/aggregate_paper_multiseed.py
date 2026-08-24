@@ -16,6 +16,7 @@ from tda_ml.preflight import (
     PAPER_NO_CLS_CONTRACT,
     preflight_tune_json,
 )
+from tda_ml.run_paths import assert_no_legacy_paper_run_namespace
 from tda_ml.supervised_diagnostics import git_revision
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -44,6 +45,7 @@ def _first_key(payload: dict[str, Any], keys: Sequence[str], *, label: str) -> f
 
 
 def discover_seed_metrics(out_base: Path, test_glob: str) -> dict[int, dict[str, Any]]:
+    assert_no_legacy_paper_run_namespace(out_base)
     by_seed: dict[int, dict[str, Any]] = {}
     for metrics_path in sorted(out_base.glob(test_glob)):
         run_dir = metrics_path.parent.parent

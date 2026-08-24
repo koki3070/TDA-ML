@@ -4,7 +4,7 @@
 
 ## リポジトリに含まれる範囲（目安）
 
-- **含む:** `tda_ml/`、**`configs/` 直下の正本 YAML**（`base.yaml` と `reproduce` / `dev` / `prod` / `test_fast`、および論文比較用の `paper_n100_o20_nocls_h1_ellphi_lpca_power` / `tune_n100_o20_nocls_h1_ellphi_lpca_power`）、`tests/`、追跡されている `scripts/`、論文・再現用 `experiments/`（下記）、および `README.md` / `REPRODUCIBILITY.md` / `pyproject.toml` / `uv.lock` / `LICENSE` / `CITATION.cff` などのメタデータ。
+- **含む:** `tda_ml/`、**`configs/` 直下の正本 YAML**（`base.yaml` と `reproduce` / `dev` / `prod` / `test_fast`、論文比較用の `paper_n100_o20_nocls_h1_ellphi_lpca_power` / `tune_n100_o20_nocls_h1_ellphi_lpca_power`、および Methods opt-in の `methods_n100_o20_nocls_*`）、`tests/`、追跡されている `scripts/`、論文・再現用 `experiments/`（下記）、および `README.md` / `REPRODUCIBILITY.md` / `pyproject.toml` / `uv.lock` / `LICENSE` / `CITATION.cff` などのメタデータ。
 - **含めない:** `docs/` 以下（**ローカル実験メモ**；公開方針で git に入れる場合は別途決定）、`configs/archive/`（履歴用 YAML を置く場合は **ローカルのみ**）、`outputs/`、`data/`、`.cursor/` など。`load_config("archive/...")` は、手元に `configs/archive/*.yaml` を置いた場合にのみ使えます。
 
 ### 論文比較（W-Dist / MCC 二目的）で使う `experiments/`
@@ -73,7 +73,23 @@ uv run python experiments/eval_paper.py \
 
 主表・チューニングの preflight は `homology_dimensions=[1]`、`teacher_mode=local_pca`、`prob_weighting=false`、`aniso_mode=elongate`、`distance_backend=ellphi`、`size_mode=power`、`w_class=0.0`、`teacher_local_pca_k=10`、`teacher_local_pca_normalize_axes=true` の明示を要求する。欠落や不一致は実行前に hard-fail する。本番 30ep は `--tune-json`（H1-only Optuna best）必須で、YAML 埋め込みの旧重みでは起動しない。
 
-**退化ガード variant（主表外・Methods opt-in）:** near-tangent データでは素の `elongate` が短軸→0 まで潰し、ellphi tangency が hard-fail し得る。対策として `aniso_mode: elongate_barrier`（`PAPER_NO_CLS_BARRIER_CONTRACT`、`aniso_barrier_threshold=6.0`、`distance_backend=ellphi`）を **YAML で明示したときだけ**使う。公開ツリーにはこの variant 用 YAML を置かない（コード契約とテストで担保；ローカル `configs/archive/` に置く場合のみ）。暗黙の切替はしない。主表の ADBSCAN 比較・本番 30ep 経路には使わない。
+**退化ガード variant（主表外・Methods opt-in）:** near-tangent データでは素の `elongate` が短軸→0 まで潰し、ellphi tangency が hard-fail し得る。対策として `aniso_mode: elongate_barrier`（`PAPER_NO_CLS_BARRIER_CONTRACT`、`aniso_barrier_threshold=6.0`、`distance_backend=ellphi`）を **YAML で明示したときだけ**使う。公開正本: `methods_n100_o20_nocls_h1_ellphi_lpca_power_neartangent_barrier`（`BASE_CONFIG=...`）。Euclidean-teacher 対比列は `methods_n100_o20_nocls_h1_maha_euclid_power`。暗黙の切替はしない。主表の ADBSCAN 比較・本番 30ep 経路には使わない。
+
+## 命名移行（2026-07 / PR #7）— 破壊的
+
+論文本番の run / tune 出力の識別子を短縮した。**旧ツリーは集計・freshness 対象外。再実行必須。** 暗黙に旧 path を拾わない（[Computational Reproducibility skill](https://github.com/t-uda/skills/blob/main/skills/computational-reproducibility/SKILL.md)）。
+
+| 種別 | 旧 | 新 |
+|------|----|----|
+| 本番 run-dir | `pwr_s{seed}_*` | `paper_s{seed}_*` |
+| 本番 out base | `outputs/supervised/pwr30_*` | `outputs/supervised/paper30_*` |
+| tune out | `outputs/tune/pwr_wdist` / `pwr_mcc` | `outputs/tune/wdist` / `mcc` |
+| best JSON | `best_elongate_wdist_*.json` | `best_wdist_*.json` |
+| metrics tag | `power_{wdist,mcc}_valtopo_paper_eval` | `wdist` / `mcc` |
+| Optuna study | `elongate_local_pca_power_*` | `tune_{wdist,mcc}_*` |
+
+- `aggregate_paper_multiseed.py` / `paper_run_freshness.py` は同一 `out_base` に旧 `pwr_s*` がある場合、または `pwr_s*` と `paper_s*` が混在する場合 **hard-fail** する。
+- 旧 `config_id` `teacher_local_pca_power_seed{N}` は引き続き slug `pwr_s{N}`（新 `paper_s{N}` とは別名前空間）。再実行は新名前空間で行う。
 
 ## 環境
 
@@ -99,7 +115,7 @@ uv run python experiments/eval_paper.py \
 - MNIST は git にコミットしません（`data/` は無視対象）。
 - 学習・paper eval ともデータ根は **リポジトリ根の `data/`**（`tda_ml.config.default_data_root()`）であり、プロセスの cwd には依存しません。初回アクセス時に `torchvision` 経由でそこにダウンロードされます。
 - 初回はインターネットに到達できるようにするか、キャッシュ済みの MNIST を自分でリポジトリ根の `data/` に置いてください。
-- 設定 YAML の役割分担は **`configs/README.md`** を参照（共有プロファイル + 論文用 `paper_n100_o20_nocls_h1_ellphi_lpca_power` / `tune_n100_o20_nocls_h1_ellphi_lpca_power`）。旧設定はローカルで `configs/archive/` に置けるが、公開クローンには同梱されない。
+- 設定 YAML の役割分担は **`configs/README.md`** を参照（共有プロファイル + 論文用 `paper_*` / `tune_*` + Methods `methods_*`）。探索用の旧設定はローカルで `configs/archive/` に置けるが、公開クローンには同梱されない。
 
 ## チェックポイントと実行出力
 

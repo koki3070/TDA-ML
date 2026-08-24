@@ -118,34 +118,18 @@ class TestTuneTrialConfig(unittest.TestCase):
         self.assertEqual(cfg["loss"]["aniso_mode"], "elongate")
 
     def test_wdist_builder_mirrors_barrier_variant_from_base_config(self):
-        from copy import deepcopy
-
-        from tda_ml.config import load_config
-
-        # No public Methods YAML for barrier; declare the variant inline.
-        barrier = load_config(
-            "tune_n100_o20_nocls_h1_ellphi_lpca_power",
-            project_root=REPO,
+        cfg = build_wdist_trial(
+            "methods_n100_o20_nocls_h1_ellphi_lpca_power_neartangent_barrier",
+            w_aniso=0.1,
+            w_size=0.2,
+            w_topo=0.3,
+            lr=1e-4,
+            backend="ellphi",
+            tune_epochs=5,
+            out_base="outputs/x",
+            trial_number=3,
+            size_mode="power",
         )
-        barrier["loss"]["aniso_mode"] = "elongate_barrier"
-        barrier["loss"]["aniso_barrier_threshold"] = 6.0
-
-        with mock.patch(
-            "tune_wdist.load_config",
-            side_effect=lambda *a, **k: deepcopy(barrier),
-        ):
-            cfg = build_wdist_trial(
-                "ignored",
-                w_aniso=0.1,
-                w_size=0.2,
-                w_topo=0.3,
-                lr=1e-4,
-                backend="ellphi",
-                tune_epochs=5,
-                out_base="outputs/x",
-                trial_number=3,
-                size_mode="power",
-            )
         self.assertEqual(cfg["loss"]["aniso_mode"], "elongate_barrier")
         self.assertEqual(cfg["loss"]["aniso_barrier_threshold"], 6.0)
         self.assertEqual(cfg["model"]["topology_loss"]["homology_dimensions"], [1])

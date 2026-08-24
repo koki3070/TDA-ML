@@ -41,6 +41,19 @@ class TestPaperEvalImports(unittest.TestCase):
         assert_paper_no_cls_contract(
             load_config("tune_n100_o20_nocls_h1_ellphi_lpca_power")
         )
+        assert_paper_no_cls_contract(
+            load_config(
+                "methods_n100_o20_nocls_h1_ellphi_lpca_power_neartangent_barrier"
+            )
+        )
+
+    def test_methods_euclid_baseline_declares_contrast_stack(self):
+        cfg = load_config("methods_n100_o20_nocls_h1_maha_euclid_power")
+        self.assertEqual(cfg["loss"]["teacher_mode"], "euclidean")
+        self.assertEqual(cfg["model"]["topology_loss"]["distance_backend"], "mahalanobis")
+        self.assertEqual(cfg["model"]["topology_loss"]["homology_dimensions"], [1])
+        self.assertEqual(cfg["loss"]["w_class"], 0.0)
+        self.assertEqual(cfg["training"]["selection"]["metric"], "val_topo")
 
     def test_paper_eval_requires_best_model_only(self):
         with tempfile.TemporaryDirectory() as tmp:

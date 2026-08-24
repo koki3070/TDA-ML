@@ -20,6 +20,7 @@ from run_paper_30ep import (  # noqa: E402
     load_tune_weights,
 )
 from tda_ml.preflight import PAPER_NO_CLS_CONTRACT, preflight_training_config  # noqa: E402
+from tda_ml.run_paths import assert_no_legacy_paper_run_namespace  # noqa: E402
 
 
 class TestAggregateDiscover(unittest.TestCase):
@@ -53,6 +54,21 @@ class TestAggregateDiscover(unittest.TestCase):
             )
             with self.assertRaisesRegex(ValueError, "Missing run_manifest"):
                 discover_seed_metrics(root, "**/paper_metrics_test_*.json")
+
+    def test_legacy_pwr_namespace_hard_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pwr_s42_old" / "logs").mkdir(parents=True)
+            with self.assertRaisesRegex(RuntimeError, "Legacy pwr_s"):
+                discover_seed_metrics(root, "paper_s*/logs/paper_metrics_test_*.json")
+
+    def test_mixed_pwr_paper_namespace_hard_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pwr_s42_old" / "logs").mkdir(parents=True)
+            (root / "paper_s42_new" / "logs").mkdir(parents=True)
+            with self.assertRaisesRegex(RuntimeError, "Mixed legacy"):
+                discover_seed_metrics(root, "paper_s*/logs/paper_metrics_test_*.json")
 
 
 class TestLoadTuneWeights(unittest.TestCase):
@@ -165,6 +181,25 @@ class TestFreshness(unittest.TestCase):
                 expected_revision="newrev",
             )
             self.assertEqual(status, "stale")
+
+    def test_legacy_pwr_namespace_hard_fails_before_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pwr_s42_old" / "logs").mkdir(parents=True)
+            with self.assertRaisesRegex(RuntimeError, "Legacy pwr_s"):
+                inspect_seed_metrics(
+                    out_base=root,
+                    seed=42,
+                    tag="wdist",
+                    tune_json=Path(tmp) / "best.json",
+                    expected_revision="deadbeef",
+                )
+
+
+class TestLegacyNamespaceHelper(unittest.TestCase):
+    def test_empty_out_base_ok(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            assert_no_legacy_paper_run_namespace(Path(tmp))
 
 
 class TestPaperContractExpanded(unittest.TestCase):

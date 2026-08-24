@@ -60,9 +60,9 @@ def shorten_config_id(config_id: str, *, max_len: int = 24) -> str:
     if m:
         return f"smk_{m.group(1)}"
 
-    # Named paper/tune YAMLs: drop the dataset/contract tokens but keep the role,
-    # otherwise paper_* and tune_* collapse to the same run-dir slug.
-    m = re.fullmatch(r"(paper|tune)_n\d+_o\d+_nocls_(.+)", config_id)
+    # Named paper/tune/methods YAMLs: drop dataset/contract tokens but keep the
+    # role, otherwise paper_* / tune_* / methods_* collapse to the same slug.
+    m = re.fullmatch(r"(paper|tune|methods)_n\d+_o\d+_nocls_(.+)", config_id)
     if m:
         slug = f"{m.group(1)}_{m.group(2)}"
         return slug[:max_len] if len(slug) > max_len else slug
@@ -126,3 +126,46 @@ def tune_base(slug: str, when: datetime.datetime | None = None) -> str:
 
 def visualization_filename(epoch: int) -> str:
     return f"e{epoch}.png"
+
+
+def assert_no_legacy_paper_run_namespace(
+    out_base: Path,
+    *,
+    seed: int | None = None,
+) -> None:
+    """Refuse legacy ``pwr_s*`` trees (pre-PR#7) and mixed namespaces.
+
+    Production runs were renamed ``pwr_s*`` → ``paper_s*``. Aggregating or
+    skipping via silent reuse of legacy trees would be an implicit fallback;
+    hard-fail instead and require a fresh ``paper_s*`` tree (or a clean out_base).
+    """
+    out_base = Path(out_base)
+    if not out_base.exists():
+        return
+    if seed is None:
+        legacy_dirs = sorted(p for p in out_base.glob("pwr_s*") if p.is_dir())
+        modern_dirs = sorted(p for p in out_base.glob("paper_s*") if p.is_dir())
+    else:
+        legacy_dirs = sorted(
+            p for p in out_base.glob(f"pwr_s{seed}_*") if p.is_dir()
+        )
+        modern_dirs = sorted(
+            p for p in out_base.glob(f"paper_s{seed}_*") if p.is_dir()
+        )
+
+    if legacy_dirs and modern_dirs:
+        raise RuntimeError(
+            f"Mixed legacy pwr_s* and paper_s* under {out_base}: "
+            f"legacy={[p.name for p in legacy_dirs]}, "
+            f"modern={[p.name for p in modern_dirs]}. "
+            "Refuse to aggregate or skip; use one namespace only "
+            "(move/delete legacy trees or choose a fresh --out-base)."
+        )
+    if legacy_dirs:
+        raise RuntimeError(
+            f"Legacy pwr_s* run tree(s) under {out_base}: "
+            f"{[p.name for p in legacy_dirs]}. "
+            "PR #7 renamed production runs to paper_s*; legacy trees are not "
+            "aggregated or treated as fresh. Move/delete them or use a fresh "
+            "--out-base, then re-run production."
+        )
