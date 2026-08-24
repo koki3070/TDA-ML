@@ -43,7 +43,7 @@ def inspect_seed_metrics(
     expected_revision: str | None = None,
 ) -> tuple[str, list[Path]]:
     """Return ``(status, paths)`` where status is fresh|missing|stale|ambiguous."""
-    assert_no_legacy_paper_run_namespace(out_base, seed=seed)
+    assert_no_legacy_paper_run_namespace(out_base)
     pattern = f"paper_s{seed}_*/logs/paper_metrics_test_{tag}.json"
     matches = sorted(out_base.glob(pattern))
     if not matches:

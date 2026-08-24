@@ -196,6 +196,20 @@ class TestFreshness(unittest.TestCase):
                     expected_revision="deadbeef",
                 )
 
+    def test_other_seed_legacy_pwr_hard_fails_before_missing(self):
+        """Leftover pwr_s* for a different seed must not look like 'missing'."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pwr_s123_old" / "logs").mkdir(parents=True)
+            with self.assertRaisesRegex(RuntimeError, "Legacy pwr_s"):
+                inspect_seed_metrics(
+                    out_base=root,
+                    seed=42,
+                    tag="wdist",
+                    tune_json=Path(tmp) / "best.json",
+                    expected_revision="deadbeef",
+                )
+
 
 class TestFreshnessCLI(unittest.TestCase):
     """The 30ep driver keys off CLI exit codes: 1 = run, 2 = refuse."""
@@ -238,6 +252,15 @@ class TestFreshnessCLI(unittest.TestCase):
             self.assertEqual(proc.returncode, 2, proc.stderr)
             self.assertIn("Legacy pwr_s", proc.stderr)
 
+    def test_cli_other_seed_legacy_pwr_exits_2_not_1(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pwr_s123_old" / "logs").mkdir(parents=True)
+            proc = self._run_cli(root, seed=42)
+            self.assertEqual(proc.returncode, 2, proc.stderr)
+            self.assertIn("Legacy pwr_s", proc.stderr)
+            self.assertNotEqual(proc.returncode, 1)
+
     def test_cli_mixed_namespace_exits_2_not_1(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -246,6 +269,16 @@ class TestFreshnessCLI(unittest.TestCase):
             proc = self._run_cli(root)
             self.assertEqual(proc.returncode, 2, proc.stderr)
             self.assertIn("Mixed legacy", proc.stderr)
+
+    def test_cli_mixed_other_seed_legacy_exits_2_not_1(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pwr_s123_old" / "logs").mkdir(parents=True)
+            (root / "paper_s42_new" / "logs").mkdir(parents=True)
+            proc = self._run_cli(root, seed=42)
+            self.assertEqual(proc.returncode, 2, proc.stderr)
+            self.assertIn("Mixed legacy", proc.stderr)
+            self.assertNotEqual(proc.returncode, 1)
 
     def test_cli_stale_revision_exits_2(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -291,6 +324,21 @@ class TestLegacyNamespaceHelper(unittest.TestCase):
     def test_empty_out_base_ok(self):
         with tempfile.TemporaryDirectory() as tmp:
             assert_no_legacy_paper_run_namespace(Path(tmp))
+
+    def test_other_seed_legacy_tree_hard_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pwr_s123_old" / "logs").mkdir(parents=True)
+            with self.assertRaisesRegex(RuntimeError, "Legacy pwr_s"):
+                assert_no_legacy_paper_run_namespace(root)
+
+    def test_mixed_other_seed_legacy_with_modern_hard_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pwr_s123_old" / "logs").mkdir(parents=True)
+            (root / "paper_s42_new" / "logs").mkdir(parents=True)
+            with self.assertRaisesRegex(RuntimeError, "Mixed legacy"):
+                assert_no_legacy_paper_run_namespace(root)
 
 
 class TestPaperContractExpanded(unittest.TestCase):

@@ -88,7 +88,7 @@ uv run python experiments/eval_paper.py \
 | metrics tag | `power_{wdist,mcc}_valtopo_paper_eval` | `wdist` / `mcc` |
 | Optuna study | `elongate_local_pca_power_*` | `tune_{wdist,mcc}_*` |
 
-- `aggregate_paper_multiseed.py` / `paper_run_freshness.py` は同一 `out_base` に旧 `pwr_s*` がある場合、または `pwr_s*` と `paper_s*` が混在する場合 **hard-fail** する。freshness CLI はこの拒否を **exit 2** にする（exit 1 = metrics 欠落ではない）。30ep driver が旧 tree を missing と誤認して同一 `out_base` に `paper_s*` を作り始めない。
+- `aggregate_paper_multiseed.py` / `paper_run_freshness.py` は同一 `out_base` に旧 `pwr_s*` がある場合、または `pwr_s*` と `paper_s*` が混在する場合 **hard-fail** する。検査は **`--seed` 単位ではなく `out_base` 全体**（`pwr_s123_*` が残っているとき `--seed 42` も拒否）。freshness CLI はこの拒否を **exit 2** にする（exit 1 = metrics 欠落ではない）。30ep driver が旧 tree を missing と誤認して同一 `out_base` に `paper_s*` を作り始めない。
 - 旧 `config_id` `teacher_local_pca_power_seed{N}` は引き続き slug `pwr_s{N}`（新 `paper_s{N}` とは別名前空間）。再実行は新名前空間で行う。
 
 ## 環境

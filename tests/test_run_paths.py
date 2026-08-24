@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import datetime
+import tempfile
 import unittest
+from pathlib import Path
 
 from tda_ml.run_paths import (
     OUTPUT_CATEGORIES,
+    assert_no_legacy_paper_run_namespace,
     build_run_dir,
     experiment_base,
     resolve_run_slug,
@@ -84,6 +87,13 @@ class TestRunPaths(unittest.TestCase):
 
     def test_visualization_filename(self) -> None:
         self.assertEqual(visualization_filename(30), "e30.png")
+
+    def test_legacy_namespace_is_out_base_wide(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pwr_s123_old").mkdir()
+            with self.assertRaisesRegex(RuntimeError, "Legacy pwr_s"):
+                assert_no_legacy_paper_run_namespace(root)
 
 
 if __name__ == "__main__":

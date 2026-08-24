@@ -128,30 +128,23 @@ def visualization_filename(epoch: int) -> str:
     return f"e{epoch}.png"
 
 
-def assert_no_legacy_paper_run_namespace(
-    out_base: Path,
-    *,
-    seed: int | None = None,
-) -> None:
-    """Refuse legacy ``pwr_s*`` trees (pre-PR#7) and mixed namespaces.
+def assert_no_legacy_paper_run_namespace(out_base: Path) -> None:
+    """Refuse leftover ``pwr_s*`` trees (pre-PR#7) and mixed namespaces.
 
-    Production runs were renamed ``pwr_s*`` → ``paper_s*``. Aggregating or
-    skipping via silent reuse of legacy trees would be an implicit fallback;
-    hard-fail instead and require a fresh ``paper_s*`` tree (or a clean out_base).
+    Production runs were renamed ``pwr_s*`` → ``paper_s*``. The check is
+    **out_base-wide**, not per-seed: leftover ``pwr_s123_*`` must block a
+    freshness probe for seed 42, otherwise the 30ep driver would treat that
+    seed as missing and start ``paper_s42_*`` beside the legacy tree.
+
+    Aggregating or skipping via silent reuse of legacy trees would be an
+    implicit fallback; hard-fail instead and require a fresh ``paper_s*``
+    tree (or a clean out_base).
     """
     out_base = Path(out_base)
     if not out_base.exists():
         return
-    if seed is None:
-        legacy_dirs = sorted(p for p in out_base.glob("pwr_s*") if p.is_dir())
-        modern_dirs = sorted(p for p in out_base.glob("paper_s*") if p.is_dir())
-    else:
-        legacy_dirs = sorted(
-            p for p in out_base.glob(f"pwr_s{seed}_*") if p.is_dir()
-        )
-        modern_dirs = sorted(
-            p for p in out_base.glob(f"paper_s{seed}_*") if p.is_dir()
-        )
+    legacy_dirs = sorted(p for p in out_base.glob("pwr_s*") if p.is_dir())
+    modern_dirs = sorted(p for p in out_base.glob("paper_s*") if p.is_dir())
 
     if legacy_dirs and modern_dirs:
         raise RuntimeError(
