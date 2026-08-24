@@ -18,7 +18,7 @@ class TestTuneTrialConfig(unittest.TestCase):
     def test_paper_declares_topology_contract(self):
         from tda_ml.config import load_config
 
-        cfg = load_config("paper_n100_o20_nocls_h1_ellphi_lpca_power")
+        cfg = load_config("paper_mnist_h1")
         self.assertEqual(cfg["model"]["topology_loss"]["homology_dimensions"], [1])
         self.assertFalse(cfg["model"]["topology_loss"]["prob_weighting"])
         self.assertEqual(cfg["loss"]["teacher_mode"], "local_pca")
@@ -30,7 +30,7 @@ class TestTuneTrialConfig(unittest.TestCase):
 
     def test_canonical_power_tune_base(self):
         cfg = build_wdist_trial(
-            "tune_n100_o20_nocls_h1_ellphi_lpca_power",
+            "tune_mnist_h1",
             w_aniso=0.1,
             w_size=0.2,
             w_topo=0.3,
@@ -51,7 +51,7 @@ class TestTuneTrialConfig(unittest.TestCase):
 
     def test_power_tune_preserves_h1_hard_fail_stack(self):
         cfg = build_wdist_trial(
-            "tune_n100_o20_nocls_h1_ellphi_lpca_power",
+            "tune_mnist_h1",
             w_aniso=0.1,
             w_size=0.2,
             w_topo=0.3,
@@ -73,7 +73,7 @@ class TestTuneTrialConfig(unittest.TestCase):
         from tda_ml.config import load_config
 
         divergent = load_config(
-            "tune_n100_o20_nocls_h1_ellphi_lpca_power",
+            "tune_mnist_h1",
             project_root=REPO,
         )
         divergent["model"]["topology_loss"]["homology_dimensions"] = [0, 1]
@@ -121,7 +121,7 @@ class TestTuneTrialConfig(unittest.TestCase):
 
     def test_wdist_builder_mirrors_barrier_variant_from_base_config(self):
         cfg = build_wdist_trial(
-            "methods_n100_o20_nocls_h1_ellphi_lpca_power_neartangent_barrier",
+            "methods_mnist_neartangent",
             w_aniso=0.1,
             w_size=0.2,
             w_topo=0.3,
@@ -138,7 +138,7 @@ class TestTuneTrialConfig(unittest.TestCase):
 
     def test_mcc_builder_forces_homology_h1(self):
         cfg = build_mcc_trial(
-            "tune_n100_o20_nocls_h1_ellphi_lpca_power",
+            "tune_mnist_h1",
             w_aniso=0.1,
             w_size=0.2,
             w_topo=0.3,

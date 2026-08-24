@@ -48,7 +48,7 @@ H1-only, **MNIST + uniform outliers**, local-PCA teacher, ellphi distance,
 checkpoint `best_model.pth` (`selection=val_topo`), then val DBSCAN grid →
 test MCC / G-Mean.
 
-Config: `paper_n100_o20_nocls_h1_ellphi_lpca_power`.
+Config: `paper_mnist_h1`.
 
 ```bash
 # 1) Tune once (Optuna sampler seeds differ per worker; data seed in YAML is 42).
@@ -59,7 +59,7 @@ MODE=wdist bash experiments/tune_objectives.sh
 bash experiments/run_paper_30ep_multiseed.sh wdist
 
 uv run python experiments/eval_baselines.py \
-  --base-config paper_n100_o20_nocls_h1_ellphi_lpca_power \
+  --base-config paper_mnist_h1 \
   --out-dir outputs/paper_baselines
 ```
 

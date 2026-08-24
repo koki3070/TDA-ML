@@ -1,13 +1,10 @@
-# Paper main-table production (30 epochs).
-# Naming: n100=max_points, o20=num_outliers, nocls=w_class=0, h1, ellphi,
-# lpca=teacher local_pca, power=size_mode. aniso_mode=elongate is the contract
-# default (not encoded in the filename).
-# Degenerate ellphi geometry hard-fails.
-# Production weights MUST come from an H1-only Optuna best JSON (--tune-json).
-# The w_* / lr values below are Optuna prior centres only (not paper results).
+# Shared Optuna tune base for W-Dist and MCC studies (same stack as paper YAML).
+# Naming matches paper_mnist_h1 except role=tune
+# (default epochs=20; drivers may override). Trial objective is chosen by the
+# tune driver (tune_wdist.py vs tune_mcc.py), not by config_id.
 
 meta:
-  config_id: "paper_n100_o20_nocls_h1_ellphi_lpca_power"
+  config_id: "tune_mnist_h1"
 
 model:
   point_dim: 2
@@ -23,12 +20,11 @@ model:
 
 loss:
   w_class: 0.0
-  # Prior centres for Optuna; paper production requires --tune-json overrides.
-  w_topo: 0.0883
+  w_topo: 0.0883   # maha anchors as Optuna prior centre; search in tune script
   w_aniso: 0.0541
   w_size: 0.488
   pos_weight: 1.0
-  aniso_mode: elongate
+  aniso_mode: "elongate"
   size_mode: power
   size_ref: 1.34
   size_power: 1.5
@@ -40,9 +36,9 @@ loss:
 
 training:
   lr: 0.000158
-  epochs: 30
+  epochs: 20
   grad_clip_value: 1.0
-  visualize_every: 10
+  visualize_every: 10000
   warmup_epochs: 0
   selection:
     metric: val_topo

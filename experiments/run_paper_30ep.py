@@ -21,7 +21,7 @@ from tda_ml.preflight import (  # noqa: E402
     preflight_tune_production_run,
 )
 
-BASE_CONFIG = "paper_n100_o20_nocls_h1_ellphi_lpca_power"
+BASE_CONFIG = "paper_mnist_h1"
 TAG_MCC = "mcc"
 TAG_WDIST = "wdist"
 

@@ -127,7 +127,7 @@ class TestPreflightHomology(unittest.TestCase):
         from tda_ml.config import deep_update, load_config
 
         cfg = load_config(
-            "paper_n100_o20_nocls_h1_ellphi_lpca_power",
+            "paper_mnist_h1",
             project_root=REPO,
         )
         bad = deep_update(

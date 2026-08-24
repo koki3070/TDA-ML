@@ -9,7 +9,7 @@ Usage::
 
     uv run python experiments/eval_paper.py \\
         --run-dir outputs/supervised/.../paper_s42_<stamp> \\
-        --base-config paper_n100_o20_nocls_h1_ellphi_lpca_power \\
+        --base-config paper_mnist_h1 \\
         --split val
 
     uv run python experiments/eval_paper.py \\
@@ -456,7 +456,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--base-config",
         type=str,
-        default="paper_n100_o20_nocls_h1_ellphi_lpca_power",
+        default="paper_mnist_h1",
         help="YAML used when run_manifest lacks method overrides (paper no_cls default).",
     )
     p.add_argument("--split", choices=["val", "test"], required=True)

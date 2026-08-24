@@ -48,7 +48,7 @@ MCC_OUT="${MCC_OUT:-outputs/supervised/paper30_mcc}"
 LOG_ROOT="${LOG_ROOT:-outputs/supervised/paper30_multiseed}"
 EPOCHS="${EPOCHS:-30}"
 DBSCAN_BACKEND="${DBSCAN_BACKEND:-mahalanobis}"
-BASE_CONFIG="${BASE_CONFIG:-paper_n100_o20_nocls_h1_ellphi_lpca_power}"
+BASE_CONFIG="${BASE_CONFIG:-paper_mnist_h1}"
 # Declared paper contract variant the tune JSONs must match (elongate | elongate_barrier).
 ANISO_VARIANT="${ANISO_VARIANT:-elongate}"
 

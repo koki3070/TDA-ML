@@ -36,14 +36,14 @@ class TestPaperEvalImports(unittest.TestCase):
 
     def test_public_paper_configs_pass_contract(self):
         assert_paper_no_cls_contract(
-            load_config("paper_n100_o20_nocls_h1_ellphi_lpca_power")
+            load_config("paper_mnist_h1")
         )
         assert_paper_no_cls_contract(
-            load_config("tune_n100_o20_nocls_h1_ellphi_lpca_power")
+            load_config("tune_mnist_h1")
         )
         assert_paper_no_cls_contract(
             load_config(
-                "methods_n100_o20_nocls_h1_ellphi_lpca_power_neartangent_barrier"
+                "methods_mnist_neartangent"
             )
         )
 
@@ -59,7 +59,7 @@ class TestPaperEvalImports(unittest.TestCase):
                 resolve_val_topo_checkpoint(run_dir)
 
     def test_manifest_records_zero_pad_constant(self):
-        cfg = load_config("paper_n100_o20_nocls_h1_ellphi_lpca_power")
+        cfg = load_config("paper_mnist_h1")
         fields = build_reproducibility_manifest_fields(cfg)
         self.assertIn("ZERO_PAD_ABS_SUM", fields["numerical_constants"])
 

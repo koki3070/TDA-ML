@@ -26,10 +26,10 @@ class TestRunPaths(unittest.TestCase):
         self.assertEqual(shorten_config_id("tune_mcc_t010"), "t010")
 
     def test_shorten_config_id_keeps_paper_tune_role_distinct(self) -> None:
-        paper = shorten_config_id("paper_n100_o20_nocls_h1_ellphi_lpca_power")
-        tune = shorten_config_id("tune_n100_o20_nocls_h1_ellphi_lpca_power")
+        paper = shorten_config_id("paper_mnist_h1")
+        tune = shorten_config_id("tune_mnist_h1")
         methods = shorten_config_id(
-            "methods_n100_o20_nocls_h1_ellphi_lpca_power_neartangent_barrier"
+            "methods_mnist_neartangent"
         )
         self.assertTrue(paper.startswith("paper_"))
         self.assertTrue(tune.startswith("tune_"))

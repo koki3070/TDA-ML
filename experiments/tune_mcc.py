@@ -201,7 +201,7 @@ def make_objective(args: argparse.Namespace):
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     # No implicit default: every study must state its config surface explicitly
-    # (power stack uses tune_n100_o20_nocls_h1_ellphi_lpca_power).
+    # (power stack uses tune_mnist_h1).
     p.add_argument("--base-config", type=str, required=True)
     p.add_argument("--n-trials", type=int, default=24)
     p.add_argument(
